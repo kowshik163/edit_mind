@@ -1,0 +1,260 @@
+"""
+Hybrid Video AI - The core autonomous video editing AI system
+Combines reasoning, perception, and editing capabilities in a unified model
+"""
+
+import torch
+import torch.nn as nn
+from typing import Dict, List, Optional, Tuple, Any
+from transformers import (
+    AutoTokenizer, 
+    AutoModel,
+    LlamaForCausalLM,
+    CLIPVisionModel,
+    WhisperModel
+)
+
+from ..models.multimodal_fusion import MultiModalFusionModule
+from ..models.video_understanding import VideoUnderstandingModule
+from ..models.editing_planner import EditingPlannerModule
+from ..perception.vision_processor import VisionProcessor
+from ..audio.audio_processor import AudioProcessor
+from ..editing.timeline_generator import TimelineGenerator
+
+
+class HybridVideoAI(nn.Module):
+    """
+    Main Hybrid AI model that fuses multiple capabilities:
+    - Language reasoning (CodeLLaMA/Mixtral)
+    - Vision understanding (SigLIP + RT-DETR + SAM)
+    - Audio analysis (Whisper + BeatNet)
+    - Video editing logic (Custom transformer)
+    - Code generation for effects
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.config = config
+        
+        # Initialize tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            config['model']['backbone'],
+            padding_side="left"
+        )
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+        # Core reasoning backbone (CodeLLaMA/Mixtral)
+        self.language_model = LlamaForCausalLM.from_pretrained(
+            config['model']['backbone'],
+            torch_dtype=torch.bfloat16,
+            device_map="auto" if torch.cuda.is_available() else None,
+            load_in_8bit=config.get('quantization', {}).get('load_in_8bit', False)
+        )
+        
+        # Vision encoder (SigLIP)
+        self.vision_encoder = CLIPVisionModel.from_pretrained(
+            config['model']['vision_encoder']
+        )
+        
+        # Audio encoder (Whisper)  
+        self.audio_encoder = WhisperModel.from_pretrained(
+            config['model']['audio_encoder']
+        )
+        
+        # Multimodal fusion layer
+        self.fusion_module = MultiModalFusionModule(
+            text_dim=config['model']['text_dim'],
+            vision_dim=config['model']['vision_dim'], 
+            audio_dim=config['model']['audio_dim'],
+            fusion_dim=config['model']['fusion_dim'],
+            num_heads=config['model']['num_attention_heads']
+        )
+        
+        # Video understanding module
+        self.video_understanding = VideoUnderstandingModule(
+            fusion_dim=config['model']['fusion_dim'],
+            hidden_dim=config['model']['hidden_dim']
+        )
+        
+        # Editing planner 
+        self.editing_planner = EditingPlannerModule(
+            hidden_dim=config['model']['hidden_dim'],
+            vocab_size=len(self.tokenizer)
+        )
+        
+        # Specialized processors
+        self.vision_processor = VisionProcessor(config)
+        self.audio_processor = AudioProcessor(config)
+        self.timeline_generator = TimelineGenerator(config)
+        
+        # Training phase tracker
+        self.current_phase = "pretraining"
+        
+    def forward(self, 
+                video_frames: Optional[torch.Tensor] = None,
+                audio_features: Optional[torch.Tensor] = None, 
+                text_input_ids: Optional[torch.Tensor] = None,
+                text_attention_mask: Optional[torch.Tensor] = None,
+                editing_prompt: Optional[str] = None,
+                return_timeline: bool = False) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass through the hybrid AI system
+        
+        Args:
+            video_frames: (B, T, C, H, W) video tensor
+            audio_features: (B, T, F) audio features
+            text_input_ids: (B, L) tokenized text
+            text_attention_mask: (B, L) attention mask
+            editing_prompt: Natural language editing instruction
+            return_timeline: Whether to generate editing timeline
+            
+        Returns:
+            Dictionary with model outputs
+        """
+        outputs = {}
+        
+        # Process text input
+        if text_input_ids is not None:
+            text_embeddings = self.language_model.get_input_embeddings()(text_input_ids)
+            outputs['text_embeddings'] = text_embeddings
+        
+        # Process vision input
+        if video_frames is not None:
+            B, T, C, H, W = video_frames.shape
+            # Flatten time dimension for vision encoder
+            frames_flat = video_frames.view(B * T, C, H, W)
+            vision_outputs = self.vision_encoder(pixel_values=frames_flat)
+            vision_embeddings = vision_outputs.last_hidden_state.mean(dim=1)  # Pool
+            vision_embeddings = vision_embeddings.view(B, T, -1)
+            outputs['vision_embeddings'] = vision_embeddings
+            
+        # Process audio input
+        if audio_features is not None:
+            # Use Whisper encoder for audio embeddings
+            audio_embeddings = self.audio_encoder.encoder(audio_features).last_hidden_state
+            outputs['audio_embeddings'] = audio_embeddings
+            
+        # Multimodal fusion
+        if any(k in outputs for k in ['text_embeddings', 'vision_embeddings', 'audio_embeddings']):
+            fused_embeddings = self.fusion_module(
+                text_emb=outputs.get('text_embeddings'),
+                vision_emb=outputs.get('vision_embeddings'), 
+                audio_emb=outputs.get('audio_embeddings')
+            )
+            outputs['fused_embeddings'] = fused_embeddings
+            
+            # Video understanding
+            video_understanding = self.video_understanding(fused_embeddings)
+            outputs['video_understanding'] = video_understanding
+            
+        # Generate editing plan if requested
+        if return_timeline and editing_prompt:
+            timeline = self.generate_editing_timeline(editing_prompt, outputs)
+            outputs['timeline'] = timeline
+            
+        return outputs
+    
+    def generate_editing_timeline(self, prompt: str, context: Dict[str, torch.Tensor]) -> Dict:
+        """Generate editing timeline from natural language prompt"""
+        
+        # Encode prompt
+        prompt_tokens = self.tokenizer.encode(prompt, return_tensors='pt')
+        if torch.cuda.is_available():
+            prompt_tokens = prompt_tokens.cuda()
+            
+        # Use editing planner to generate timeline tokens
+        with torch.no_grad():
+            timeline_logits = self.editing_planner(
+                input_ids=prompt_tokens,
+                context_embeddings=context.get('fused_embeddings')
+            )
+            
+        # Convert to editing timeline
+        timeline = self.timeline_generator.decode_timeline(timeline_logits)
+        return timeline
+    
+    def autonomous_edit(self, video_path: str, prompt: str) -> str:
+        """
+        Main autonomous editing pipeline
+        
+        Args:
+            video_path: Path to input video
+            prompt: Natural language editing instruction
+            
+        Returns:
+            Path to edited video
+        """
+        # Load and preprocess video
+        video_data = self.vision_processor.load_video(video_path)
+        audio_data = self.audio_processor.load_audio(video_path)
+        
+        # Run inference
+        outputs = self.forward(
+            video_frames=video_data['frames'],
+            audio_features=audio_data['features'],
+            editing_prompt=prompt,
+            return_timeline=True
+        )
+        
+        # Generate final video
+        output_path = self.timeline_generator.render_video(
+            timeline=outputs['timeline'],
+            video_data=video_data,
+            audio_data=audio_data
+        )
+        
+        return output_path
+        
+    def set_training_phase(self, phase: str):
+        """Set current training phase for different optimization strategies"""
+        self.current_phase = phase
+        
+        if phase == "distillation":
+            # Freeze certain layers during distillation
+            for param in self.language_model.parameters():
+                param.requires_grad = False
+        elif phase == "editing_finetuning":
+            # Use LoRA for efficient fine-tuning
+            self._setup_lora()
+        elif phase == "self_improvement":
+            # Enable all parameters for RLHF
+            for param in self.parameters():
+                param.requires_grad = True
+                
+    def _setup_lora(self):
+        """Setup LoRA for parameter-efficient fine-tuning"""
+        from peft import LoraConfig, get_peft_model
+        
+        lora_config = LoraConfig(
+            r=self.config['training']['phase3']['lora_r'],
+            lora_alpha=self.config['training']['phase3']['lora_alpha'], 
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        
+        self.language_model = get_peft_model(self.language_model, lora_config)
+        
+    def save_checkpoint(self, path: str, epoch: int, optimizer_state: dict = None):
+        """Save model checkpoint"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.state_dict(),
+            'config': self.config,
+            'current_phase': self.current_phase
+        }
+        if optimizer_state:
+            checkpoint['optimizer_state_dict'] = optimizer_state
+            
+        torch.save(checkpoint, path)
+        
+    @classmethod
+    def from_checkpoint(cls, checkpoint_path: str):
+        """Load model from checkpoint"""
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        model = cls(checkpoint['config'])
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.current_phase = checkpoint.get('current_phase', 'pretraining')
+        return model
