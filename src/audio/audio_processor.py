@@ -187,14 +187,51 @@ class AudioProcessor:
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
             # Generate transcription
+            # Generate transcription with confidence scores
             with torch.no_grad():
-                predicted_ids = self.whisper_model.generate(**inputs)
-                transcription = self.whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+                predicted_ids = self.whisper_model.generate(
+                    **inputs,
+                    return_dict_in_generate=True,
+                    output_scores=True
+                )
+                transcription = self.whisper_processor.batch_decode(
+                    predicted_ids.sequences, skip_special_tokens=True
+                )[0]
+                
+                # Calculate confidence from generation scores
+                if hasattr(predicted_ids, 'scores') and predicted_ids.scores:
+                    # Average confidence across tokens
+                    scores = torch.stack(predicted_ids.scores)
+                    probs = torch.softmax(scores, dim=-1)
+                    max_probs = torch.max(probs, dim=-1)[0]
+                    confidence = torch.mean(max_probs).item()
+                else:
+                    confidence = 0.8  # Default confidence
+                
+                # Detect language from Whisper model
+                try:
+                    # Use Whisper's built-in language detection
+                    language_tokens = predicted_ids.sequences[0][:4]  # First few tokens often contain language info
+                    language = self.whisper_processor.tokenizer.decode(language_tokens)
+                    
+                    # Parse common language tokens
+                    if '<|en|>' in language or 'english' in transcription.lower()[:50]:
+                        detected_language = 'en'
+                    elif '<|es|>' in language or any(word in transcription.lower() for word in ['el', 'la', 'de', 'con']):
+                        detected_language = 'es'
+                    elif '<|fr|>' in language or any(word in transcription.lower() for word in ['le', 'la', 'de', 'avec']):
+                        detected_language = 'fr'
+                    else:
+                        detected_language = 'en'  # Default to English
+                        
+                except Exception as e:
+                    logger.debug(f"Language detection failed: {e}")
+                    detected_language = 'en'
             
             return {
                 'text': transcription,
-                'confidence': 0.8,  # Placeholder confidence score
-                'language': 'en'    # Placeholder language detection
+                'confidence': confidence,
+                'language': detected_language
             }
             
         except Exception as e:

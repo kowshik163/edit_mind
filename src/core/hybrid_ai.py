@@ -5,6 +5,7 @@ Combines reasoning, perception, and editing capabilities in a unified model
 
 import torch
 import torch.nn as nn
+import logging
 from typing import Dict, List, Optional, Tuple, Any
 from transformers import (
     AutoTokenizer, 
@@ -18,6 +19,10 @@ from ..models.multimodal_fusion import MultiModalFusionModule
 from ..models.video_understanding import VideoUnderstandingModule
 from ..models.editing_planner import EditingPlannerModule
 from ..perception.vision_processor import VisionProcessor
+from ..utils.model_downloader import ModelDownloader
+
+# Setup logging
+logger = logging.getLogger(__name__)
 from ..audio.audio_processor import AudioProcessor
 from ..editing.timeline_generator import TimelineGenerator
 
@@ -36,30 +41,52 @@ class HybridVideoAI(nn.Module):
         super().__init__()
         self.config = config
         
+        # Auto-download models if not available
+        self._ensure_models_available()
+        
         # Initialize tokenizer
+        model_name = config['model'].get('backbone', 'microsoft/DialoGPT-small')
         self.tokenizer = AutoTokenizer.from_pretrained(
-            config['model']['backbone'],
-            padding_side="left"
+            model_name,
+            padding_side="left",
+            cache_dir=config.get('model_cache_dir', 'models/cache')
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
         # Core reasoning backbone (CodeLLaMA/Mixtral)
-        self.language_model = LlamaForCausalLM.from_pretrained(
-            config['model']['backbone'],
-            torch_dtype=torch.bfloat16,
-            device_map="auto" if torch.cuda.is_available() else None,
-            load_in_8bit=config.get('quantization', {}).get('load_in_8bit', False)
-        )
+        try:
+            self.language_model = LlamaForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                device_map="auto" if torch.cuda.is_available() else None,
+                load_in_8bit=config.get('quantization', {}).get('load_in_8bit', False),
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load LlamaForCausalLM, using AutoModel: {e}")
+            self.language_model = AutoModel.from_pretrained(
+                model_name,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
         
-        # Vision encoder (SigLIP)
+        # Vision encoder (CLIP)
+        vision_model = config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32')
         self.vision_encoder = CLIPVisionModel.from_pretrained(
-            config['model']['vision_encoder']
+            vision_model,
+            cache_dir=config.get('model_cache_dir', 'models/cache')
         )
         
         # Audio encoder (Whisper)  
+        audio_model = config['model'].get('audio_encoder', 'openai/whisper-tiny')
         self.audio_encoder = WhisperModel.from_pretrained(
-            config['model']['audio_encoder']
+            audio_model,
+            cache_dir=config.get('model_cache_dir', 'models/cache')
+        )
+        
+        # Initialize model downloader
+        self.model_downloader = ModelDownloader(
+            cache_dir=config.get('model_cache_dir', 'models/cache')
         )
         
         # Multimodal fusion layer
@@ -91,6 +118,35 @@ class HybridVideoAI(nn.Module):
         # Training phase tracker
         self.current_phase = "pretraining"
         
+    def _ensure_models_available(self):
+        """Ensure all required models are downloaded and available"""
+        try:
+            # Get model names from config
+            backbone_model = self.config['model'].get('backbone', 'microsoft/DialoGPT-small')
+            vision_model = self.config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32') 
+            audio_model = self.config['model'].get('audio_encoder', 'openai/whisper-tiny')
+            
+            # Auto-download models using the model downloader
+            model_downloader = ModelDownloader(
+                cache_dir=self.config.get('model_cache_dir', 'models/cache')
+            )
+            
+            logger.info("Ensuring required models are available...")
+            
+            # Download backbone model
+            model_downloader.download_model(backbone_model, model_type='language')
+            
+            # Download vision model  
+            model_downloader.download_model(vision_model, model_type='vision')
+            
+            # Download audio model
+            model_downloader.download_model(audio_model, model_type='audio')
+            
+            logger.info("All required models are available")
+            
+        except Exception as e:
+            logger.warning(f"Model download failed, will attempt to load from cache: {e}")
+    
     def forward(self, 
                 video_frames: Optional[torch.Tensor] = None,
                 audio_features: Optional[torch.Tensor] = None, 
@@ -224,7 +280,11 @@ class HybridVideoAI(nn.Module):
                 
     def _setup_lora(self):
         """Setup LoRA for parameter-efficient fine-tuning"""
-        from peft import LoraConfig, get_peft_model
+        try:
+            from peft import LoraConfig, get_peft_model
+        except ImportError:
+            logger.warning("PEFT not available, skipping LoRA setup")
+            return
         
         lora_config = LoraConfig(
             r=self.config['training']['phase3']['lora_r'],

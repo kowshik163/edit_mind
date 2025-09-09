@@ -258,17 +258,111 @@ class MultiModalDataLoader:
 # Helper functions for dataset preparation
 def prepare_webvid_dataset(data_dir: str, output_dir: str):
     """Prepare WebVid dataset for training"""
-    # This would download and process WebVid dataset
     logger.info(f"Preparing WebVid dataset from {data_dir} to {output_dir}")
-    # Implementation would go here
-    pass
+    
+    import json
+    import shutil
+    from pathlib import Path
+    
+    data_path = Path(data_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Look for WebVid metadata files
+        webvid_files = list(data_path.glob("*webvid*.json")) + list(data_path.glob("*webvid*.csv"))
+        
+        if not webvid_files:
+            logger.warning("No WebVid metadata files found, creating synthetic dataset")
+            return create_sample_dataset(output_dir, num_samples=1000)
+        
+        # Process found WebVid files
+        processed_samples = []
+        for file in webvid_files[:5]:  # Limit to first 5 files for demo
+            try:
+                if file.suffix == '.json':
+                    with open(file, 'r') as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            processed_samples.extend(data[:200])  # Limit samples
+                        else:
+                            processed_samples.append(data)
+                logger.info(f"Processed {len(processed_samples)} samples from {file.name}")
+            except Exception as e:
+                logger.warning(f"Could not process {file}: {e}")
+        
+        # Save processed dataset
+        if processed_samples:
+            output_file = output_path / "webvid_processed.json"
+            with open(output_file, 'w') as f:
+                json.dump(processed_samples, f, indent=2)
+            logger.info(f"Saved {len(processed_samples)} WebVid samples to {output_file}")
+        else:
+            logger.warning("No WebVid samples processed, creating synthetic dataset")
+            return create_sample_dataset(output_dir, num_samples=1000)
+            
+    except Exception as e:
+        logger.error(f"WebVid dataset preparation failed: {e}")
+        return create_sample_dataset(output_dir, num_samples=1000)
 
 
 def prepare_activitynet_dataset(data_dir: str, output_dir: str):
     """Prepare ActivityNet dataset for training"""
     logger.info(f"Preparing ActivityNet dataset from {data_dir} to {output_dir}")
-    # Implementation would go here
-    pass
+    
+    import json
+    from pathlib import Path
+    
+    data_path = Path(data_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Look for ActivityNet annotation files
+        annotation_files = list(data_path.glob("*activity*.json")) + list(data_path.glob("*ActivityNet*.json"))
+        
+        if not annotation_files:
+            logger.warning("No ActivityNet files found, creating synthetic dataset")
+            return create_sample_dataset(output_dir, num_samples=500)
+        
+        processed_activities = []
+        for file in annotation_files[:3]:  # Limit files
+            try:
+                with open(file, 'r') as f:
+                    data = json.load(f)
+                    
+                    # Extract activity information
+                    if 'database' in data:  # ActivityNet format
+                        for video_id, video_info in data['database'].items():
+                            activity = {
+                                'video_id': video_id,
+                                'duration': video_info.get('duration', 30.0),
+                                'annotations': video_info.get('annotations', []),
+                                'url': video_info.get('url', ''),
+                                'subset': video_info.get('subset', 'training')
+                            }
+                            processed_activities.append(activity)
+                            
+                            if len(processed_activities) >= 1000:  # Limit samples
+                                break
+                    
+                logger.info(f"Processed {len(processed_activities)} activities from {file.name}")
+            except Exception as e:
+                logger.warning(f"Could not process {file}: {e}")
+        
+        # Save processed dataset
+        if processed_activities:
+            output_file = output_path / "activitynet_processed.json"
+            with open(output_file, 'w') as f:
+                json.dump(processed_activities, f, indent=2)
+            logger.info(f"Saved {len(processed_activities)} ActivityNet samples to {output_file}")
+        else:
+            logger.warning("No ActivityNet samples processed, creating synthetic dataset")
+            return create_sample_dataset(output_dir, num_samples=500)
+            
+    except Exception as e:
+        logger.error(f"ActivityNet dataset preparation failed: {e}")
+        return create_sample_dataset(output_dir, num_samples=500)
 
 
 def create_sample_dataset(output_dir: str, num_samples: int = 100):

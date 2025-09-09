@@ -1,0 +1,94 @@
+[
+  {
+    "video_id": "train_video_0",
+    "video_path": "train_video_0.mp4",
+    "audio_path": "train_audio_0.wav",
+    "prompt": "Edit this video to create a cinematic video with smooth transitions and engaging pacing.",
+    "target_timeline": {
+      "cuts": [
+        2.0,
+        4.0,
+        6.0
+      ],
+      "transitions": [
+        "fade",
+        "cut",
+        "dissolve"
+      ],
+      "effects": [
+        "color_grade",
+        "speed_ramp",
+        "zoom"
+      ]
+    }
+  },
+  {
+    "video_id": "train_video_1",
+    "video_path": "train_video_1.mp4",
+    "audio_path": "train_audio_1.wav",
+    "prompt": "Edit this video to create a AMV-style video with smooth transitions and engaging pacing.",
+    "target_timeline": {
+      "cuts": [
+        2.5,
+        4.5,
+        6.5
+      ],
+      "transitions": [
+        "fade",
+        "cut",
+        "dissolve"
+      ],
+      "effects": [
+        "color_grade",
+        "speed_ramp",
+        "zoom"
+      ]
+    }
+  },
+  {
+    "video_id": "train_video_2",
+    "video_path": "train_video_2.mp4",
+    "audio_path": "train_audio_2.wav",
+    "prompt": "Edit this video to create a TikTok-style video with smooth transitions and engaging pacing.",
+    "target_timeline": {
+      "cuts": [
+        3.0,
+        5.0,
+        7.0
+      ],
+      "transitions": [
+        "fade",
+        "cut",
+        "dissolve"
+      ],
+      "effects": [
+        "color_grade",
+        "speed_ramp",
+        "zoom"
+      ]
+    }
+  },
+  {
+    "video_id": "train_video_3",
+    "video_path": "train_video_3.mp4",
+    "audio_path": "train_audio_3.wav",
+    "prompt": "Edit this video to create a cinematic video with smooth transitions and engaging pacing.",
+    "target_timeline": {
+      "cuts": [
+        3.5,
+        5.5,
+        7.5
+      ],
+      "transitions": [
+        "fade",
+        "cut",
+        "dissolve"
+      ],
+      "effects": [
+        "color_grade",
+        "speed_ramp",
+        "zoom"
+      ]
+    }
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "video_id": "val_video_0",
+    "video_path": "val_video_0.mp4",
+    "audio_path": "val_audio_0.wav",
+    "prompt": "Edit this video to create a cinematic video with smooth transitions and engaging pacing.",
+    "target_timeline": {
+      "cuts": [
+        2.0,
+        4.0,
+        6.0
+      ],
+      "transitions": [
+        "fade",
+        "cut",
+        "dissolve"
+      ],
+      "effects": [
+        "color_grade",
+        "speed_ramp",
+        "zoom"
+      ]
+    }
+  }
+]

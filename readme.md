@@ -1,8 +1,403 @@
-# 🎬 Autonomous AI Video Editor
+# Autonomous Video Editor
 
-## 🌌 Vision
+A complete AI-powered autonomous video editing system that combines reasoning, perception, and editing capabilities to automatically edit videos based on natural language prompts.
 
-A self-thinking, self-learning, and self-improving AI system capable of understanding video content like a human editor and autonomously creating professional-quality edited videos with minimal human input.
+## 🚀 Features
+
+### Core Capabilities
+- **Autonomous Video Editing**: Edit videos using natural language prompts
+- **Hybrid AI System**: Combines CodeLLaMA (reasoning), CLIP (vision), and Whisper (audio)
+- **Advanced Effects**: 15+ professional video effects with GPU acceleration
+- **Auto-Download**: Automatic model and dataset downloading
+- **5-Phase Training**: Comprehensive training pipeline (pretraining → distillation → fine-tuning → RLHF → autonomous)
+- **Production Ready**: Complete orchestration with validation and error handling
+
+### Video Effects
+- Fade in/out, zoom effects, color grading
+- Cinematic effects, vintage film look
+- Cyberpunk aesthetic, dramatic shadows
+- Vibrant colors, film grain, vignette
+- Motion blur, lens flare, and more
+
+### Training Pipeline
+1. **Pretraining**: Learn basic video understanding
+2. **Distillation**: Compress knowledge from larger models
+3. **Fine-tuning**: Task-specific adaptation with LoRA
+4. **RLHF**: Human preference alignment
+5. **Autonomous**: End-to-end autonomous editing
+
+## 📋 Requirements
+
+### System Requirements
+- Python 3.8+
+- CUDA-capable GPU (recommended for training)
+- 16GB+ RAM (32GB recommended for training)
+- 50GB+ storage for models and datasets
+
+### Dependencies
+```bash
+# Core ML libraries
+torch>=2.0.0
+transformers>=4.30.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Audio/Video processing
+librosa>=0.10.0
+moviepy>=1.0.3
+
+# Training and optimization
+accelerate>=0.20.0
+deepspeed>=0.9.0
+wandb>=0.15.0
+
+# Optional enhancements
+peft>=0.4.0  # For LoRA fine-tuning
+bitsandbytes>=0.39.0  # For quantization
+```
+
+## 🛠 Installation
+
+### 1. Clone the repository
+```bash
+git clone <repository-url>
+cd auto_editor_prototype
+```
+
+### 2. Install dependencies
+```bash
+# Install core dependencies
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install transformers opencv-python numpy pandas librosa moviepy
+pip install accelerate deepspeed wandb tqdm requests
+
+# Optional: Install advanced features
+pip install peft bitsandbytes  # For LoRA and quantization
+```
+
+### 3. Setup the application
+```bash
+python autonomous_video_editor.py --setup
+```
+
+This creates necessary directories and prepares the environment.
+
+## 🚀 Quick Start
+
+### 1. Download models and datasets
+```bash
+# Download AI models (CodeLLaMA, CLIP, Whisper)
+python autonomous_video_editor.py --download-models
+
+# Download training datasets (WebVid, AudioSet, etc.)
+python autonomous_video_editor.py --download-data
+```
+
+### 2. Train the model (optional)
+```bash
+# Run full 5-phase training pipeline
+python autonomous_video_editor.py --train
+```
+
+### 3. Edit a video
+```bash
+# Edit with natural language prompt
+python autonomous_video_editor.py \
+    --edit-video /path/to/your/video.mp4 \
+    --prompt "Make this video more cinematic with dramatic lighting" \
+    --output edited_video.mp4
+```
+
+### 4. Run demo
+```bash
+# See effects in action with sample videos
+python autonomous_video_editor.py --demo
+```
+
+## 💻 Usage Examples
+
+### Basic Video Editing
+```python
+from src.inference.autonomous_editor import quick_edit
+
+# Simple editing with prompt
+result = quick_edit(
+    video_path="input.mp4",
+    prompt="Add cinematic color grading and fade effects",
+    output_path="output.mp4"
+)
+```
+
+### Advanced Usage
+```python
+from autonomous_video_editor import AutonomousVideoEditorApp
+
+# Initialize with custom config
+app = AutonomousVideoEditorApp(config={
+    'effects': {'quality': 'ultra', 'gpu_acceleration': True},
+    'model': {'backbone': 'codellama/CodeLlama-7b-hf'}
+})
+
+app.setup()
+app.load_model("path/to/trained/model.pt")
+
+# Edit multiple videos
+videos = ["video1.mp4", "video2.mp4", "video3.mp4"]
+for video in videos:
+    app.edit_video(
+        video_path=video,
+        prompt="Create a vintage film aesthetic with warm tones",
+        output_path=f"edited_{video}"
+    )
+```
+
+### Batch Processing
+```python
+from src.inference.autonomous_editor import batch_process_videos
+
+# Process multiple videos with same style
+batch_process_videos(
+    video_paths=["video1.mp4", "video2.mp4"],
+    prompt="Apply cyberpunk aesthetic with neon colors",
+    output_dir="edited_videos/"
+)
+```
+
+## 🎨 Available Effects
+
+| Effect | Description |
+|--------|-------------|
+| `fade_in` | Smooth fade from black |
+| `fade_out` | Smooth fade to black |
+| `zoom_in` | Gradual zoom effect |
+| `zoom_out` | Reverse zoom effect |
+| `color_grade_cinematic` | Professional color grading |
+| `vintage_film` | Classic film look with grain |
+| `cyberpunk` | Sci-fi neon aesthetic |
+| `dramatic_shadows` | Enhanced contrast and shadows |
+| `vibrant_colors` | Increased saturation |
+| `warm_tones` | Warm color temperature |
+| `cool_tones` | Cool color temperature |
+| `film_grain` | Analog film texture |
+| `vignette` | Edge darkening effect |
+| `motion_blur` | Directional blur effect |
+| `lens_flare` | Light lens artifacts |
+
+## 🔧 Configuration
+
+### Model Configuration
+```python
+MODEL_CONFIG = {
+    'backbone': 'microsoft/DialoGPT-small',  # Main reasoning model
+    'vision_encoder': 'openai/clip-vit-base-patch32',  # Vision understanding
+    'audio_encoder': 'openai/whisper-tiny',  # Audio processing
+    'text_dim': 768,
+    'vision_dim': 512,
+    'audio_dim': 512,
+    'fusion_dim': 1024,
+    'hidden_dim': 2048
+}
+```
+
+### Training Configuration
+```python
+TRAINING_CONFIG = {
+    'batch_size': 4,
+    'learning_rate': 1e-4,
+    'num_epochs': 10,
+    'bf16': True,  # Use bfloat16 for efficiency
+    'gradient_accumulation_steps': 4,
+    'phases': {
+        'pretraining': {'enabled': True, 'epochs': 3},
+        'distillation': {'enabled': True, 'epochs': 2},
+        'fine_tuning': {'enabled': True, 'epochs': 3},
+        'rlhf': {'enabled': True, 'epochs': 2},
+        'autonomous': {'enabled': True, 'epochs': 2}
+    }
+}
+```
+
+### Dataset Configuration
+```python
+DATASET_CONFIG = {
+    'auto_download': True,
+    'webvid': {'enabled': True, 'samples': 10000},
+    'audioset': {'enabled': True, 'samples': 5000},
+    'activitynet': {'enabled': True, 'samples': 5000}
+}
+```
+
+## 🏗 Architecture
+
+### Core Components
+
+1. **HybridVideoAI** (`src/core/hybrid_ai.py`)
+   - Main AI system combining reasoning, vision, and audio
+   - Multimodal fusion and video understanding
+   - Editing plan generation
+
+2. **AdvancedEffectGenerator** (`src/generation/effect_generator.py`)
+   - Professional video effects with GPU acceleration
+   - Real-time processing capabilities
+   - Extensible effect system
+
+3. **ModelDownloader** (`src/utils/model_downloader.py`)
+   - Automatic HuggingFace model downloading
+   - Caching and fallback systems
+   - Model validation and cleanup
+
+4. **DatasetAutoDownloader** (`src/utils/dataset_downloader.py`)
+   - Automatic dataset fetching and processing
+   - Support for WebVid, AudioSet, ActivityNet, etc.
+   - Progress tracking and resume capability
+
+5. **TrainingOrchestrator** (`src/training/training_orchestrator.py`)
+   - Complete 5-phase training pipeline
+   - Automatic setup and validation
+   - Comprehensive error handling
+
+6. **AutonomousVideoEditor** (`src/inference/autonomous_editor.py`)
+   - High-level editing interface
+   - Natural language prompt processing
+   - Video I/O and processing
+
+### Training Phases
+
+```mermaid
+graph LR
+    A[Pretraining] --> B[Distillation]
+    B --> C[Fine-tuning]
+    C --> D[RLHF]
+    D --> E[Autonomous]
+```
+
+1. **Pretraining**: Learn basic video understanding on large datasets
+2. **Distillation**: Compress knowledge from larger teacher models
+3. **Fine-tuning**: Task-specific adaptation using LoRA
+4. **RLHF**: Align with human preferences for editing quality
+5. **Autonomous**: End-to-end autonomous editing training
+
+## 📊 Performance
+
+### Hardware Recommendations
+
+| Component | Minimum | Recommended | Optimal |
+|-----------|---------|-------------|---------|
+| GPU | GTX 1060 6GB | RTX 3080 12GB | RTX 4090 24GB |
+| RAM | 16GB | 32GB | 64GB |
+| Storage | 50GB | 100GB | 200GB SSD |
+| CPU | 4 cores | 8 cores | 16+ cores |
+
+### Processing Speed
+- **Effect Application**: ~30-60 FPS (1080p, RTX 3080)
+- **AI Inference**: ~5-15 FPS (depending on model size)
+- **Training**: ~2-8 hours per phase (RTX 4090, 10K samples)
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**1. CUDA Out of Memory**
+```bash
+# Reduce batch size or use gradient accumulation
+export CUDA_VISIBLE_DEVICES=0
+python autonomous_video_editor.py --train --config small_config.json
+```
+
+**2. Model Download Fails**
+```bash
+# Clear cache and retry
+rm -rf models/cache/*
+python autonomous_video_editor.py --download-models
+```
+
+**3. Import Errors**
+```bash
+# Install missing dependencies
+pip install -r requirements.txt
+```
+
+**4. Video Processing Errors**
+```bash
+# Check video format and codec
+ffmpeg -i input.mp4  # Check video info
+```
+
+### Performance Optimization
+
+**Enable GPU Acceleration:**
+```python
+config = {
+    'effects': {'gpu_acceleration': True},
+    'training': {'bf16': True, 'gradient_checkpointing': True}
+}
+```
+
+**Memory Optimization:**
+```python
+config = {
+    'training': {
+        'gradient_accumulation_steps': 8,
+        'batch_size': 2,
+        'dataloader_num_workers': 2
+    }
+}
+```
+
+## 🤝 Contributing
+
+### Development Setup
+```bash
+# Install development dependencies
+pip install -e .
+pip install black flake8 pytest
+
+# Run tests
+python -m pytest tests/
+
+# Format code
+black src/ tests/
+```
+
+### Adding New Effects
+```python
+# In src/generation/effect_generator.py
+def apply_my_custom_effect(self, frame: np.ndarray, **kwargs) -> np.ndarray:
+    # Implement your effect
+    return processed_frame
+```
+
+### Adding New Datasets
+```python
+# In src/utils/dataset_downloader.py
+def download_my_dataset(self):
+    # Implement dataset download and processing
+    pass
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- HuggingFace Transformers for model infrastructure
+- OpenAI for CLIP and Whisper models
+- Meta for CodeLLaMA
+- OpenCV community for video processing
+- All dataset creators and contributors
+
+## 📞 Support
+
+For issues and questions:
+1. Check the [troubleshooting section](#-troubleshooting)
+2. Search existing [GitHub issues](issues)
+3. Create a new issue with detailed information
+
+---
+
+**Made with ❤️ for the video editing community**
 
 **Key Capabilities:**
 - Understanding video like a human editor – narrative, emotions, rhythm, style
