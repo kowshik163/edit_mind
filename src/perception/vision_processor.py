@@ -2,6 +2,7 @@
 Vision Processor - Advanced video understanding with CLIP and object detection
 """
 
+import os
 import cv2
 import torch
 import numpy as np
@@ -33,32 +34,65 @@ class VisionProcessor:
         logger.info(f"VisionProcessor initialized on {self.device}")
     
     def load_video(self, video_path: str) -> Dict[str, Any]:
-        """Load and preprocess video"""
+        """Load and preprocess video - FIXED to return actual data"""
         try:
+            # Check if file exists
+            if not os.path.exists(video_path):
+                logger.error(f"Video file not found: {video_path}")
+                return self._get_empty_video_data()
+            
             frames = self.extract_frames(video_path)
+            
+            if not frames:
+                logger.warning(f"No frames extracted from {video_path}")
+                return self._get_empty_video_data()
             
             # Get video metadata
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             duration = frame_count / fps if fps > 0 else 0
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
             
+            # Stack frames into tensor (B, C, H, W)
+            frames_tensor = torch.stack(frames)
+            
+            # Get comprehensive analysis
+            analysis = self.analyze_scene(frames)
+            
             return {
-                'frames': torch.stack(frames) if frames else torch.zeros(0, 3, *self.frame_size),
+                'frames': frames_tensor,  # ACTUAL TENSOR DATA
                 'fps': fps,
                 'duration': duration,
-                'num_frames': len(frames)
+                'num_frames': len(frames),
+                'width': width,
+                'height': height,
+                'embeddings': analysis.get('embeddings'),
+                'detections': analysis.get('detections', []),
+                'scene_stats': analysis.get('scene_stats', {}),
+                'temporal_features': analysis.get('temporal_features')
             }
             
         except Exception as e:
             logger.error(f"Error loading video {video_path}: {e}")
-            return {
-                'frames': torch.zeros(0, 3, *self.frame_size),
-                'fps': 30,
-                'duration': 0.0,
-                'num_frames': 0
-            }
+            return self._get_empty_video_data()
+    
+    def _get_empty_video_data(self) -> Dict[str, Any]:
+        """Return empty video data structure"""
+        return {
+            'frames': torch.zeros(1, 3, *self.frame_size),
+            'fps': 30.0,
+            'duration': 0.0,
+            'num_frames': 0,
+            'width': self.frame_size[0],
+            'height': self.frame_size[1],
+            'embeddings': torch.zeros(1, 512),
+            'detections': [],
+            'scene_stats': {'avg_brightness': 0.0, 'motion_intensity': 0.0},
+            'temporal_features': torch.zeros(3, 512)
+        }
     
     def extract_frames(self, video_path: str, max_frames: int = 1000) -> List[torch.Tensor]:
         """Extract frames from video using OpenCV"""

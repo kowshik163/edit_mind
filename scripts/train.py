@@ -56,40 +56,88 @@ def main():
     setup_logging(level=log_level)
     logger = logging.getLogger(__name__)
     
-    logger.info("🚀 Starting Autonomous Video Editor Training")
-    logger.info(f"Config: {args.config}")
-    logger.info(f"Phase: {args.phase}")
-    
-    # Load configuration
-    config = load_config(args.config)
-    
-    # Initialize model
-    logger.info("🧠 Initializing Hybrid AI Model...")
-    if args.resume:
-        logger.info(f"📂 Resuming from checkpoint: {args.resume}")
-        model = HybridVideoAI.from_checkpoint(args.resume)
-    else:
-        model = HybridVideoAI(config)
-    
-    # Initialize trainer
-    logger.info("🏃 Initializing Trainer...")
-    trainer = MultiModalTrainer(config, model)
-    
-    # Run training based on phase
-    if args.phase == "all":
-        trainer.train_all_phases()
-    elif args.phase == "pretraining":
-        trainer.phase1_fusion_pretraining()
-    elif args.phase == "distillation":
-        trainer.phase2_distillation()
-    elif args.phase == "finetuning":
-        trainer.phase3_editing_finetuning()
-    elif args.phase == "rlhf":
-        trainer.phase4_self_improvement()
-    elif args.phase == "autonomous":
-        trainer.phase5_autonomous_integration()
-    
-    logger.info("✅ Training completed successfully!")
+    try:
+        logger.info("🚀 Starting Autonomous Video Editor Training")
+        logger.info(f"Config: {args.config}")
+        logger.info(f"Phase: {args.phase}")
+        
+        # Validate config file exists
+        if not Path(args.config).exists():
+            logger.error(f"❌ Config file not found: {args.config}")
+            sys.exit(1)
+        
+        # Load configuration
+        logger.info("📋 Loading configuration...")
+        config = load_config(args.config)
+        
+        # Setup data directories
+        data_dir = Path(config.get('data_dir', 'data'))
+        output_dir = Path(config.get('output_dir', 'output'))
+        checkpoints_dir = Path(config.get('checkpoints_dir', 'checkpoints'))
+        
+        # Create directories if they don't exist
+        for directory in [data_dir, output_dir, checkpoints_dir]:
+            directory.mkdir(parents=True, exist_ok=True)
+            logger.info(f"📁 Directory ready: {directory}")
+        
+        # Initialize model
+        logger.info("🧠 Initializing Hybrid AI Model...")
+        if args.resume and Path(args.resume).exists():
+            logger.info(f"📂 Resuming from checkpoint: {args.resume}")
+            model = HybridVideoAI.from_checkpoint(args.resume)
+        else:
+            if args.resume:
+                logger.warning(f"⚠️  Checkpoint file not found: {args.resume}, starting fresh")
+            model = HybridVideoAI(config)
+            logger.info("✅ Model initialized successfully")
+        
+        # Initialize trainer
+        logger.info("🏃 Initializing Trainer...")
+        trainer = MultiModalTrainer(config, model)
+        logger.info("✅ Trainer initialized successfully")
+        
+        # Prepare sample data if none exists
+        if not (data_dir / 'train_index.json').exists():
+            logger.info("📊 No training data found, creating sample dataset...")
+            from utils.data_loader import create_sample_dataset
+            create_sample_dataset(str(data_dir), num_samples=100)
+            logger.info("✅ Sample dataset created")
+        
+        # Run training based on phase
+        logger.info(f"🎯 Starting training phase: {args.phase}")
+        
+        if args.phase == "all":
+            logger.info("🔄 Running all training phases...")
+            trainer.train_all_phases()
+        elif args.phase == "pretraining":
+            logger.info("🔬 Phase 1: Fusion Pretraining...")
+            trainer.phase1_fusion_pretraining()
+        elif args.phase == "distillation":
+            logger.info("🎓 Phase 2: Knowledge Distillation...")
+            trainer.phase2_distillation()
+        elif args.phase == "finetuning":
+            logger.info("🎬 Phase 3: Editing Fine-tuning...")
+            trainer.phase3_editing_finetuning()
+        elif args.phase == "rlhf":
+            logger.info("🧠 Phase 4: RLHF Self-Improvement...")
+            trainer.phase4_self_improvement()
+        elif args.phase == "autonomous":
+            logger.info("🤖 Phase 5: Autonomous Integration...")
+            trainer.phase5_autonomous_integration()
+        
+        logger.info("✅ Training completed successfully!")
+        logger.info(f"📊 Model checkpoints saved in: {checkpoints_dir}")
+        logger.info(f"📋 Training logs available in: output/logs/")
+        
+    except KeyboardInterrupt:
+        logger.info("⏹️  Training interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"❌ Training failed with error: {str(e)}")
+        if args.debug:
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

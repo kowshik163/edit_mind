@@ -2,6 +2,7 @@
 Audio Processor - Advanced audio understanding with Whisper and librosa
 """
 
+import os
 import torch
 import numpy as np
 import librosa
@@ -36,14 +37,26 @@ class AudioProcessor:
         logger.info(f"AudioProcessor initialized on {self.device}")
     
     def load_audio(self, video_path: str) -> Dict[str, Any]:
-        """Load and preprocess audio from video file"""
+        """Load and preprocess audio from video file - FIXED to return actual data"""
         try:
+            # Check if file exists
+            if not os.path.exists(video_path):
+                logger.error(f"Video file not found: {video_path}")
+                return self._get_empty_audio_data()
+            
             # Extract audio using ffmpeg
             audio_path = self._extract_audio(video_path)
             
             # Load audio with librosa
-            audio, sr = librosa.load(audio_path, sr=self.sample_rate)
-            duration = len(audio) / sr
+            try:
+                audio, sr = librosa.load(audio_path, sr=self.sample_rate)
+                duration = len(audio) / sr
+            except Exception as e:
+                logger.error(f"Failed to load audio with librosa: {e}")
+                # Create silence as fallback
+                audio = np.zeros(self.sample_rate)  # 1 second silence
+                sr = self.sample_rate
+                duration = 1.0
             
             # Extract various audio features
             features = self._extract_audio_features(audio, sr)
@@ -51,23 +64,39 @@ class AudioProcessor:
             # Get transcription
             transcription = self.transcribe_audio(audio)
             
+            # Audio content analysis
+            content_analysis = self.analyze_audio_content(features)
+            
+            # Event detection
+            events = self.detect_audio_events(features)
+            
             return {
-                'audio': torch.from_numpy(audio).float(),
-                'features': features,
+                'audio': torch.from_numpy(audio).float(),  # ACTUAL AUDIO DATA
+                'features': features,  # ACTUAL FEATURE DICT
                 'sample_rate': sr,
                 'duration': duration,
-                'transcription': transcription
+                'transcription': transcription,
+                'content_analysis': content_analysis,
+                'events': events,
+                'audio_path': audio_path
             }
             
         except Exception as e:
             logger.error(f"Error loading audio from {video_path}: {e}")
-            return {
-                'audio': torch.zeros(16000),  # 1 second of silence
-                'features': self._get_empty_features(),
-                'sample_rate': self.sample_rate,
-                'duration': 0.0,
-                'transcription': {'text': ''}
-            }
+            return self._get_empty_audio_data()
+    
+    def _get_empty_audio_data(self) -> Dict[str, Any]:
+        """Return empty audio data structure"""
+        return {
+            'audio': torch.zeros(self.sample_rate),  # 1 second silence
+            'features': self._get_empty_features(),
+            'sample_rate': self.sample_rate,
+            'duration': 0.0,
+            'transcription': {'text': '', 'confidence': 0.0, 'language': 'unknown'},
+            'content_analysis': {},
+            'events': [],
+            'audio_path': None
+        }
     
     def _extract_audio(self, video_path: str) -> str:
         """Extract audio from video using ffmpeg"""
