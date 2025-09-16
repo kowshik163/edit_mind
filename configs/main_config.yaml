@@ -1,108 +1,79 @@
-# Main Configuration for Autonomous Video Editor
-# Training phases and model architectures
+project_name: autonomous_video_editor_best_ai
+description: >
+  Full multimodal AI pipeline for autonomous video editing.
+  Teachers = maximum quality models, Students = distilled/efficient deployable models.
 
-# Model Architecture
-model:
-  # Core reasoning brain
-  backbone: "meta-llama/CodeLlama-34b-Instruct-hf"  # Can switch to Mixtral-8x7B
-  vision_encoder: "google/siglip-large-patch16-384"
-  audio_encoder: "openai/whisper-large-v3"
-  
-  # Fusion configuration
-  hidden_dim: 4096
-  num_attention_heads: 32
-  num_layers: 24
-  dropout: 0.1
-  
-  # Multimodal fusion
-  vision_dim: 1024
-  audio_dim: 1280
-  text_dim: 4096
-  fusion_dim: 2048
+paths:
+  cache_dir: ./cache
+  data_dir: ./datasets
+  output_dir: ./outputs
 
-# Training Configuration
-training:
-  # Phase 1: Fusion Pretraining
-  phase1:
-    batch_size: 8
-    learning_rate: 1e-5
-    num_epochs: 5
-    warmup_steps: 1000
-    weight_decay: 0.01
-    gradient_accumulation_steps: 4
-    
-  # Phase 2: Distillation
-  phase2:
-    batch_size: 16
-    learning_rate: 5e-6
-    num_epochs: 10
-    temperature: 3.0
-    alpha: 0.7  # Balance between distillation and task loss
-    
-  # Phase 3: Editing Fine-tuning  
-  phase3:
-    batch_size: 4
-    learning_rate: 1e-6
-    num_epochs: 20
-    lora_r: 16
-    lora_alpha: 32
-    
-  # Phase 4: Self-Improvement (RLHF)
-  phase4:
-    batch_size: 8
-    learning_rate: 1e-7
-    num_episodes: 1000
-    reward_model: "vbench"
+teachers:
+  text_model: meta-llama/Llama-4-70b
+  video_model: OpenGVLab/InternVideo2-Large
+  audio_models:
+    - openai/whisper-large-v3
+    - Qwen/Qwen2-Audio
+  fusion_model: Qwen/Qwen2.5-VL-72B
 
-# Data Configuration
-data:
-  # Phase 1 datasets
-  pretraining:
-    webvid10m_path: "data/webvid10m"
-    audioset_path: "data/audioset" 
-    cc3m_path: "data/cc3m"
-    
-  # Phase 3 editing datasets
-  editing:
-    amv_path: "data/amv_dataset"
-    tiktok_path: "data/tiktok_edits"
-    trailer_path: "data/movie_trailers"
-    sports_path: "data/sports_highlights"
-    
-  # Validation
-  val_split: 0.1
-  max_video_length: 30  # seconds
-  frame_rate: 30
-  resolution: [1920, 1080]
+students:
+  text_model: microsoft/phi-3-mini-4k-instruct
+  video_model: VideoMAE/video-mae-small
+  audio_models:
+    - microsoft/wav2vec2-base
+    - AudioMAE/audio-mae-small
+  fusion_model: llava-hf/llava-v1.6-mistral-7b
 
-# Model Distillation Sources
-teacher_models:
-  object_detection: "RT-DETR/rtdetr_r50vd_6x_coco"
-  segmentation: "facebook/sam-vit-huge" 
-  speech: "openai/whisper-large-v3"
-  beat_analysis: "deezer/beat_detection"
-  optical_flow: "RAFT"
+distillation:
+  strategies:
+    - feature_matching   # Align internal embeddings
+    - logit_matching     # Soft targets (probability distillation)
+    - multimodal_alignment # Contrastive loss across text, video, audio
+  temperature: 2.0
+  alpha: 0.5   # trade-off between hard vs soft labels
+  batch_size: 16
+  learning_rate: 3e-5
 
-# Hardware Configuration  
-hardware:
-  num_gpus: 8
-  mixed_precision: "bf16"
-  gradient_checkpointing: true
-  deepspeed_config: "configs/deepspeed_stage2.json"
-
-# Logging and Checkpoints
-logging:
-  experiment_name: "autonomous_editor_v1"
-  log_dir: "experiments"
-  checkpoint_dir: "checkpoints"
-  wandb_project: "autonomous-video-editor"
+finetuning:
+  method: qlora   # parameter-efficient fine-tuning
+  precision: bfloat16
+  max_epochs: 5
+  gradient_accumulation: 8
   save_every: 1000
   eval_every: 500
 
-# Inference Configuration
-inference:
-  max_length: 2048
-  temperature: 0.8
-  top_p: 0.9
-  do_sample: true
-  num_beams: 1
+rlhf:
+  reward_model: Qwen/Qwen2.5-7B
+  dataset: openassistant/oasst2-preferences
+  method: ppo
+  rollout_batch_size: 32
+  learning_rate: 1e-6
+  epochs: 3
+
+datasets:
+  video:
+    - WebVid10M
+    - ActivityNet-Captions
+  audio:
+    - AudioSet
+    - Librispeech
+  text:
+    - openassistant/oasst1
+    - Anthropic/hh-rlhf
+  multimodal:
+    - MSRVTT
+    - HowTo100M
+    - COCO-Captions
+
+evaluation:
+  benchmarks:
+    - videoqa
+    - video_captioning
+    - asr
+    - multimodal_reasoning
+  metrics:
+    - bleu
+    - rouge
+    - cider
+    - wer
+    - accuracy

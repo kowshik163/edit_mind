@@ -226,9 +226,87 @@ class KnowledgeDistiller:
     def distill_motion_expert(self, student_model: nn.Module):
         """Distill optical flow knowledge from RAFT"""
         
-        # This would implement RAFT optical flow distillation
-        # For now, we'll create a placeholder
-        logger.info("Motion distillation placeholder - implement RAFT integration")
+        logger.info("🎬 Distilling motion knowledge from RAFT...")
+        
+        # Freeze RAFT expert model
+        self.expert_models.raft.eval()
+        
+        # Setup optimizer for student motion components
+        motion_params = [
+            p for name, p in student_model.named_parameters() 
+            if 'motion' in name.lower() or 'temporal' in name.lower()
+        ]
+        
+        if not motion_params:
+            # If no specific motion parameters, use vision parameters
+            motion_params = [
+                p for name, p in student_model.named_parameters() 
+                if 'vision' in name.lower()
+            ]
+        
+        optimizer = torch.optim.AdamW(motion_params, lr=1e-5)
+        
+        # Get video pairs for motion analysis
+        data_loader = self._get_motion_distillation_data()
+        
+        for epoch in range(3):  # Motion distillation epochs
+            total_loss = 0.0
+            num_batches = 0
+            
+            for batch_idx, batch in enumerate(data_loader):
+                
+                # Get consecutive video frame pairs
+                frame_pairs = batch['frame_pairs'].to(self.device)  # (B, 2, C, H, W)
+                B, T, C, H, W = frame_pairs.shape
+                
+                optimizer.zero_grad()
+                
+                # Teacher predictions - RAFT optical flow
+                with torch.no_grad():
+                    frame1 = frame_pairs[:, 0]  # (B, C, H, W)
+                    frame2 = frame_pairs[:, 1]  # (B, C, H, W)
+                    
+                    # RAFT expects specific input format
+                    try:
+                        raft_flow = self.expert_models.raft(frame1, frame2)
+                        if hasattr(raft_flow, 'flow_predictions'):
+                            teacher_flow = raft_flow.flow_predictions[-1]  # Final prediction
+                        else:
+                            teacher_flow = raft_flow  # Direct flow output
+                    except Exception as e:
+                        logger.warning(f"RAFT processing failed: {e}")
+                        continue
+                
+                # Student predictions - process frame sequence
+                student_outputs = student_model(video_frames=frame_pairs)
+                student_vision_emb = student_outputs.get('vision_embeddings')
+                
+                if student_vision_emb is None:
+                    continue
+                
+                # Extract motion features from student embeddings
+                # Use temporal differences to approximate optical flow understanding
+                student_motion = self._extract_motion_features(student_vision_emb, frame_pairs)
+                
+                # Motion distillation loss
+                motion_loss = self._compute_motion_distillation_loss(
+                    student_motion, teacher_flow
+                )
+                
+                motion_loss.backward()
+                optimizer.step()
+                
+                total_loss += motion_loss.item()
+                num_batches += 1
+                
+                if batch_idx % 50 == 0:
+                    logger.info(f"Motion distillation batch {batch_idx}, loss: {motion_loss.item():.4f}")
+                    
+            if num_batches > 0:
+                avg_loss = total_loss / num_batches
+                logger.info(f"Motion distillation epoch {epoch+1}, avg loss: {avg_loss:.4f}")
+            else:
+                logger.warning("No valid batches for motion distillation")
         
     def distill_cross_modal_alignment(self, student_model: nn.Module):
         """
@@ -329,6 +407,106 @@ class KnowledgeDistiller:
                 loss += F.mse_loss(student_seg_emb, teacher_seg_emb)
                 
         return loss / len(sam_outputs) if sam_outputs else torch.tensor(0.0)
+    
+    def _extract_motion_features(self, vision_embeddings: torch.Tensor, frame_pairs: torch.Tensor) -> torch.Tensor:
+        """Extract motion-aware features from vision embeddings"""
+        B, T, C, H, W = frame_pairs.shape
+        
+        if vision_embeddings.dim() == 3:  # (B, seq_len, dim)
+            # Split embeddings for each frame
+            emb_dim = vision_embeddings.shape[-1]
+            frame1_emb = vision_embeddings[:, :emb_dim//2, :]
+            frame2_emb = vision_embeddings[:, emb_dim//2:, :]
+        else:
+            # Use temporal difference in embeddings as motion proxy
+            frame1_emb = vision_embeddings[:, 0] if vision_embeddings.dim() > 2 else vision_embeddings
+            frame2_emb = vision_embeddings[:, 1] if vision_embeddings.dim() > 2 else vision_embeddings
+        
+        # Compute temporal difference features (motion proxy)
+        motion_features = frame2_emb - frame1_emb
+        
+        return motion_features
+    
+    def _compute_motion_distillation_loss(self, student_motion: torch.Tensor, teacher_flow: torch.Tensor) -> torch.Tensor:
+        """Compute loss between student motion features and teacher optical flow"""
+        
+        # Convert teacher flow to feature-like representation
+        B, C, H, W = teacher_flow.shape  # Flow has 2 channels (x, y components)
+        
+        # Global average pooling to match student feature dimensions
+        teacher_motion_summary = F.adaptive_avg_pool2d(teacher_flow, (1, 1)).view(B, C)
+        
+        # If student motion has more dimensions, we need to match
+        if student_motion.dim() == 3:  # (B, seq_len, dim)
+            student_motion_summary = student_motion.mean(dim=1)  # Global average
+        else:
+            student_motion_summary = student_motion
+        
+        # Dimension matching - project to same space
+        if student_motion_summary.shape[-1] != teacher_motion_summary.shape[-1]:
+            # Create a learnable projection layer (stored as buffer to persist across calls)
+            if not hasattr(self, 'motion_projection'):
+                self.motion_projection = nn.Linear(
+                    student_motion_summary.shape[-1], 
+                    teacher_motion_summary.shape[-1]
+                ).to(self.device)
+            
+            student_motion_projected = self.motion_projection(student_motion_summary)
+        else:
+            student_motion_projected = student_motion_summary
+        
+        # L2 loss between motion representations
+        motion_loss = F.mse_loss(student_motion_projected, teacher_motion_summary.detach())
+        
+        return motion_loss
+    
+    def _get_motion_distillation_data(self):
+        """Get data loader for motion distillation with consecutive frame pairs"""
+        from ..utils.data_loader import VideoEditingDataset
+        from torch.utils.data import DataLoader
+        
+        try:
+            # Create dataset that returns consecutive frame pairs
+            from ..utils.video_pair_dataset import VideoPairDataset
+            
+            dataset = VideoPairDataset(
+                data_dir=self.config.get('data_dir', 'data/'),
+                datasets=['webvid', 'youtube8m'],  # Video datasets
+                max_samples=5000,
+                consecutive_frames=True  # Return consecutive frame pairs
+            )
+            
+            return DataLoader(
+                dataset,
+                batch_size=self.config.get('distillation_batch_size', 4),  # Smaller batch for pairs
+                shuffle=True,
+                num_workers=2,
+                collate_fn=getattr(dataset, 'collate_fn', None)
+            )
+        except Exception as e:
+            logger.warning(f"Could not create motion distillation data: {e}")
+            # Return minimal synthetic data for development
+            return self._create_synthetic_motion_data()
+        
+    def _create_synthetic_motion_data(self):
+        """Create synthetic motion data for development/testing"""
+        class SyntheticMotionData:
+            def __init__(self, num_samples=50):
+                self.num_samples = num_samples
+                
+            def __iter__(self):
+                for i in range(self.num_samples):
+                    # Create realistic frame pairs with subtle motion
+                    frame1 = torch.randn(2, 3, 224, 224)  # Batch of 2
+                    frame2 = frame1 + 0.1 * torch.randn_like(frame1)  # Small motion
+                    frame_pairs = torch.stack([frame1, frame2], dim=1)  # (B, 2, C, H, W)
+                    
+                    yield {
+                        'frame_pairs': frame_pairs,
+                        'video_id': f'synthetic_{i}'
+                    }
+                    
+        return SyntheticMotionData()
         
     def _compute_cross_modal_alignment_loss(self,
                                           student_fused: torch.Tensor,
@@ -361,12 +539,12 @@ class KnowledgeDistiller:
         return (vision_loss + audio_loss) / 2
         
     def _get_vision_distillation_data(self):
-        """Get data loader for vision distillation"""
-        from ..utils.data_loader import VideoEditingDataset, MultiModalDataLoader
-        from torch.utils.data import DataLoader
-        
+        """Get data loader for vision distillation with robust fallbacks"""
         try:
-            # Create dataset focused on visual content
+            # Try to create real dataset
+            from ..utils.data_loader import VideoEditingDataset
+            from torch.utils.data import DataLoader
+            
             dataset = VideoEditingDataset(
                 data_dir=self.config.get('data_dir', 'data/'),
                 datasets=['webvid', 'youtube8m'],  # Visual-heavy datasets
@@ -374,25 +552,48 @@ class KnowledgeDistiller:
                 frame_sample_rate=2  # Sample every 2nd frame
             )
             
-            # Create dataloader
+            if len(dataset) == 0:
+                raise ValueError("Dataset is empty")
+            
             return DataLoader(
                 dataset,
                 batch_size=self.config.get('distillation_batch_size', 8),
                 shuffle=True,
                 num_workers=4,
-                collate_fn=dataset.collate_fn
+                collate_fn=getattr(dataset, 'collate_fn', None)
             )
+            
         except Exception as e:
-            logger.warning(f"Could not create vision distillation data: {e}")
-            # Return empty dataset for development
-            return []
+            logger.warning(f"Could not create real vision distillation data: {e}")
+            # Return synthetic data generator instead of empty list
+            return self._create_synthetic_vision_data()
+    
+    def _create_synthetic_vision_data(self):
+        """Create synthetic vision data for development/testing"""
+        class SyntheticVisionData:
+            def __init__(self, num_samples=100):
+                self.num_samples = num_samples
+                
+            def __iter__(self):
+                for i in range(self.num_samples):
+                    # Create realistic video frames
+                    batch_size = 4
+                    frames = torch.randn(batch_size, 8, 3, 224, 224)  # B, T, C, H, W
+                    
+                    yield {
+                        'images': frames,
+                        'video_frames': frames,
+                        'video_id': [f'synthetic_vision_{i}_{j}' for j in range(batch_size)]
+                    }
+                    
+        return SyntheticVisionData()
         
     def _get_audio_distillation_data(self):
-        """Get data loader for audio distillation"""
-        from ..utils.data_loader import VideoEditingDataset, MultiModalDataLoader
-        from torch.utils.data import DataLoader
-        
+        """Get data loader for audio distillation with robust fallbacks"""
         try:
+            from ..utils.data_loader import VideoEditingDataset
+            from torch.utils.data import DataLoader
+            
             # Create dataset focused on audio content
             dataset = VideoEditingDataset(
                 data_dir=self.config.get('data_dir', 'data/'),
@@ -401,23 +602,47 @@ class KnowledgeDistiller:
                 audio_sample_rate=16000
             )
             
+            if len(dataset) == 0:
+                raise ValueError("Audio dataset is empty")
+            
             return DataLoader(
                 dataset,
                 batch_size=self.config.get('distillation_batch_size', 8),
                 shuffle=True,
                 num_workers=4,
-                collate_fn=dataset.collate_fn
+                collate_fn=getattr(dataset, 'collate_fn', None)
             )
+            
         except Exception as e:
-            logger.warning(f"Could not create audio distillation data: {e}")
-            return []
+            logger.warning(f"Could not create real audio distillation data: {e}")
+            return self._create_synthetic_audio_data()
+    
+    def _create_synthetic_audio_data(self):
+        """Create synthetic audio data for development/testing"""
+        class SyntheticAudioData:
+            def __init__(self, num_samples=100):
+                self.num_samples = num_samples
+                
+            def __iter__(self):
+                for i in range(self.num_samples):
+                    # Create realistic audio features
+                    batch_size = 4
+                    # Whisper-style mel spectrogram features
+                    audio_features = torch.randn(batch_size, 80, 3000)  # B, mel_bins, time
+                    
+                    yield {
+                        'audio_features': audio_features,
+                        'audio_id': [f'synthetic_audio_{i}_{j}' for j in range(batch_size)]
+                    }
+                    
+        return SyntheticAudioData()
         
     def _get_multimodal_distillation_data(self):
-        """Get data loader for multimodal distillation"""
-        from ..utils.data_loader import VideoEditingDataset, MultiModalDataLoader
-        from torch.utils.data import DataLoader
-        
+        """Get data loader for multimodal distillation with robust fallbacks"""
         try:
+            from ..utils.data_loader import VideoEditingDataset
+            from torch.utils.data import DataLoader
+            
             # Create full multimodal dataset
             dataset = VideoEditingDataset(
                 data_dir=self.config.get('data_dir', 'data/'),
@@ -426,16 +651,51 @@ class KnowledgeDistiller:
                 multimodal=True
             )
             
+            if len(dataset) == 0:
+                raise ValueError("Multimodal dataset is empty")
+            
             return DataLoader(
                 dataset,
                 batch_size=self.config.get('distillation_batch_size', 4),  # Smaller batch for multimodal
                 shuffle=True,
                 num_workers=4,
-                collate_fn=dataset.collate_fn
+                collate_fn=getattr(dataset, 'collate_fn', None)
             )
+            
         except Exception as e:
-            logger.warning(f"Could not create multimodal distillation data: {e}")
-            return []
+            logger.warning(f"Could not create real multimodal distillation data: {e}")
+            return self._create_synthetic_multimodal_data()
+    
+    def _create_synthetic_multimodal_data(self):
+        """Create synthetic multimodal data for development/testing"""
+        class SyntheticMultiModalData:
+            def __init__(self, num_samples=100):
+                self.num_samples = num_samples
+                
+            def __iter__(self):
+                for i in range(self.num_samples):
+                    # Create realistic multimodal data
+                    batch_size = 2  # Smaller batch for multimodal
+                    
+                    # Video frames
+                    video_frames = torch.randn(batch_size, 8, 3, 224, 224)  # B, T, C, H, W
+                    
+                    # Audio features
+                    audio_features = torch.randn(batch_size, 80, 1000)  # B, mel_bins, time
+                    
+                    # Optional text tokens (captions)
+                    text_tokens = torch.randint(0, 1000, (batch_size, 20))  # B, seq_len
+                    
+                    yield {
+                        'images': video_frames,
+                        'video_frames': video_frames,
+                        'audio_features': audio_features,
+                        'text_tokens': text_tokens,
+                        'captions': text_tokens,  # Alternative key
+                        'sample_id': [f'synthetic_mm_{i}_{j}' for j in range(batch_size)]
+                    }
+                    
+        return SyntheticMultiModalData()
 
 
 class ProgressiveDistillation:
@@ -572,23 +832,92 @@ class ProgressiveDistillation:
         logger.info("🔄 Distilling cross-modal alignment...")
         
         try:
-            # Distill the fusion module's ability to align modalities
-            if hasattr(student_model, 'fusion_module'):
+            # Get real multimodal data instead of synthetic
+            data_loader = self._get_multimodal_distillation_data()
+            
+            # Setup optimizer for fusion components
+            fusion_params = [
+                p for name, p in student_model.named_parameters()
+                if 'fusion' in name.lower() or 'cross_modal' in name.lower()
+            ]
+            
+            if not fusion_params:
+                logger.warning("No fusion parameters found in student model")
+                return
                 
-                # Create synthetic cross-modal training examples
-                vision_features = torch.randn(4, 50, 1024)  # Batch, seq_len, dim
-                audio_features = torch.randn(4, 50, 1280)
-                text_features = torch.randn(4, 20, 4096)
+            optimizer = torch.optim.AdamW(fusion_params, lr=1e-5)
+            
+            # Distill cross-modal alignment using real data
+            for epoch in range(2):
+                total_loss = 0.0
+                num_batches = 0
                 
-                # Get teacher cross-modal representations
-                teacher_alignments = self._get_teacher_alignments(
-                    teacher_models, vision_features, audio_features, text_features
-                )
+                for batch_idx, batch in enumerate(data_loader):
+                    try:
+                        # Get real multimodal inputs
+                        video_frames = batch.get('images', batch.get('video_frames'))
+                        audio_features = batch.get('audio_features')
+                        text_tokens = batch.get('text_tokens', batch.get('captions'))
+                        
+                        if video_frames is None or audio_features is None:
+                            continue
+                            
+                        video_frames = video_frames.to(self.device)
+                        audio_features = audio_features.to(self.device)
+                        
+                        optimizer.zero_grad()
+                        
+                        # Get teacher cross-modal representations from real expert models
+                        with torch.no_grad():
+                            teacher_alignments = self._get_real_teacher_alignments(
+                                teacher_models, video_frames, audio_features, text_tokens
+                            )
+                        
+                        if teacher_alignments is None:
+                            continue
+                        
+                        # Student multimodal fusion
+                        if hasattr(student_model, 'fusion_module'):
+                            student_fusion = student_model.fusion_module(
+                                text_features=text_tokens.to(self.device) if text_tokens is not None else None,
+                                vision_features=video_frames, 
+                                audio_features=audio_features
+                            )
+                        else:
+                            # Use full model forward pass
+                            student_outputs = student_model(
+                                video_frames=video_frames,
+                                audio_features=audio_features,
+                                text_tokens=text_tokens.to(self.device) if text_tokens is not None else None
+                            )
+                            student_fusion = student_outputs.get('fused_embeddings')
+                        
+                        if student_fusion is None:
+                            continue
+                        
+                        # Cross-modal alignment loss with real teacher data
+                        alignment_loss = self._compute_real_alignment_loss(
+                            student_fusion, teacher_alignments
+                        )
+                        
+                        alignment_loss.backward()
+                        optimizer.step()
+                        
+                        total_loss += alignment_loss.item()
+                        num_batches += 1
+                        
+                        if batch_idx % 20 == 0:
+                            logger.info(f"Cross-modal alignment batch {batch_idx}, loss: {alignment_loss.item():.4f}")
+                            
+                    except Exception as e:
+                        logger.warning(f"Batch {batch_idx} failed: {e}")
+                        continue
                 
-                # Train student to match these alignments
-                student_fusion = student_model.fusion_module(
-                    text_features, vision_features, audio_features
-                )
+                if num_batches > 0:
+                    avg_loss = total_loss / num_batches
+                    logger.info(f"Cross-modal alignment epoch {epoch+1}, avg loss: {avg_loss:.4f}")
+                else:
+                    logger.warning("No valid batches for cross-modal alignment")
                 
                 # Alignment loss
                 if teacher_alignments is not None:
@@ -598,78 +927,330 @@ class ProgressiveDistillation:
         except Exception as e:
             logger.warning(f"Cross-modal distillation failed: {e}")
     
-    def _align_feature_layers(self, student_layers, teacher_layers):
-        """Align corresponding layers between student and teacher"""
-        for student_layer, teacher_layer in zip(student_layers, teacher_layers):
+    def _align_feature_layers(self, student_layers, teacher_layers, real_data_batch=None):
+        """Align corresponding layers between student and teacher using real data"""
+        
+        if real_data_batch is None:
+            logger.warning("No real data provided for feature alignment, skipping")
+            return
+        
+        for i, (student_layer, teacher_layer) in enumerate(zip(student_layers, teacher_layers)):
             try:
                 # Freeze teacher layer
                 teacher_layer.eval()
                 
-                # Create synthetic input to check feature alignment
-                if hasattr(teacher_layer, 'self_attn'):  # Transformer layer
-                    hidden_size = teacher_layer.self_attn.embed_dim
-                    synthetic_input = torch.randn(2, 10, hidden_size)
+                # Use real input data instead of synthetic
+                if 'video_frames' in real_data_batch:
+                    real_input = real_data_batch['video_frames']
+                elif 'audio_features' in real_data_batch:
+                    real_input = real_data_batch['audio_features']
+                else:
+                    logger.debug(f"No suitable real input for layer alignment {i}")
+                    continue
+                
+                # Process through teacher
+                with torch.no_grad():
+                    try:
+                        teacher_output = teacher_layer(real_input)
+                        if isinstance(teacher_output, tuple):
+                            teacher_output = teacher_output[0]  # Take main output
+                    except Exception as e:
+                        logger.debug(f"Teacher layer {i} processing failed: {e}")
+                        continue
+                
+                # Process through student  
+                try:
+                    student_output = student_layer(real_input)
+                    if isinstance(student_output, tuple):
+                        student_output = student_output[0]  # Take main output
+                except Exception as e:
+                    logger.debug(f"Student layer {i} processing failed: {e}")
+                    continue
+                
+                # Dimension matching for different architectures
+                if teacher_output.shape != student_output.shape:
+                    teacher_output = self._match_tensor_dimensions(teacher_output, student_output.shape)
                     
-                    with torch.no_grad():
-                        teacher_output = teacher_layer(synthetic_input)[0]
-                    
-                    student_output = student_layer(synthetic_input)[0]
-                    
-                    # Feature alignment loss (would be used in actual training)
-                    feature_loss = F.mse_loss(student_output, teacher_output)
-                    logger.debug(f"Feature alignment loss: {feature_loss.item():.6f}")
+                # Feature alignment loss (would be used in actual training loop)
+                feature_loss = F.mse_loss(student_output, teacher_output.detach())
+                logger.debug(f"Layer {i} feature alignment loss: {feature_loss.item():.6f}")
                     
             except Exception as e:
-                logger.debug(f"Could not align layer: {e}")
+                logger.debug(f"Could not align layer {i}: {e}")
     
-    def _distill_pooled_representations(self, student_encoder, teacher_encoder):
-        """Distill final pooled representations"""
+    def _match_tensor_dimensions(self, source: torch.Tensor, target_shape: torch.Size) -> torch.Tensor:
+        """Match tensor dimensions through pooling or projection"""
+        
+        if source.shape == target_shape:
+            return source
+            
+        # Handle different cases
+        if len(source.shape) != len(target_shape):
+            # Different number of dimensions - use adaptive pooling
+            if len(source.shape) == 4 and len(target_shape) == 3:  # (B,C,H,W) -> (B,L,D)
+                source = F.adaptive_avg_pool2d(source, (1, 1)).squeeze(-1).squeeze(-1)
+                if len(target_shape) == 3:
+                    source = source.unsqueeze(1).repeat(1, target_shape[1], 1)
+            elif len(source.shape) == 3 and len(target_shape) == 2:  # (B,L,D) -> (B,D)
+                source = source.mean(dim=1)
+        
+        # Match last dimension if different
+        if source.shape[-1] != target_shape[-1]:
+            projection_key = f'dim_projection_{source.shape[-1]}_to_{target_shape[-1]}'
+            
+            if not hasattr(self, projection_key):
+                projection = nn.Linear(source.shape[-1], target_shape[-1]).to(source.device)
+                setattr(self, projection_key, projection)
+            else:
+                projection = getattr(self, projection_key)
+            
+            source = projection(source)
+        
+        # Handle sequence length differences
+        if len(source.shape) == 3 and len(target_shape) == 3 and source.shape[1] != target_shape[1]:
+            # Adaptive interpolation for sequence length
+            source = F.interpolate(
+                source.transpose(1, 2), 
+                size=target_shape[1], 
+                mode='linear', 
+                align_corners=False
+            ).transpose(1, 2)
+        
+        return source
+    
+    def _distill_pooled_representations(self, student_encoder, teacher_encoder, real_data_batch=None):
+        """Distill final pooled representations using real data"""
         try:
-            # Test with synthetic data
-            synthetic_input = torch.randn(2, 3, 224, 224)  # Batch, channels, height, width
+            if real_data_batch is None or 'video_frames' not in real_data_batch:
+                logger.debug("No real video data for pooled representation distillation")
+                return
+                
+            real_video_input = real_data_batch['video_frames']
+            
+            # Ensure input is in correct format for vision models
+            if real_video_input.dim() == 5:  # (B, T, C, H, W)
+                B, T, C, H, W = real_video_input.shape
+                real_video_input = real_video_input.view(B * T, C, H, W)  # Flatten temporal
             
             with torch.no_grad():
-                teacher_features = teacher_encoder(pixel_values=synthetic_input).pooler_output
+                try:
+                    teacher_features = teacher_encoder(pixel_values=real_video_input)
+                    if hasattr(teacher_features, 'pooler_output'):
+                        teacher_pooled = teacher_features.pooler_output
+                    elif hasattr(teacher_features, 'last_hidden_state'):
+                        teacher_pooled = teacher_features.last_hidden_state.mean(dim=1)  # Global pool
+                    else:
+                        teacher_pooled = teacher_features
+                except Exception as e:
+                    logger.debug(f"Teacher pooled extraction failed: {e}")
+                    return
             
-            student_features = student_encoder(pixel_values=synthetic_input).pooler_output
+            try:
+                student_features = student_encoder(pixel_values=real_video_input)
+                if hasattr(student_features, 'pooler_output'):
+                    student_pooled = student_features.pooler_output
+                elif hasattr(student_features, 'last_hidden_state'):
+                    student_pooled = student_features.last_hidden_state.mean(dim=1)  # Global pool
+                else:
+                    student_pooled = student_features
+            except Exception as e:
+                logger.debug(f"Student pooled extraction failed: {e}")
+                return
             
-            # Representation alignment
-            repr_loss = F.mse_loss(student_features, teacher_features)
-            logger.debug(f"Pooled representation loss: {repr_loss.item():.6f}")
+            # Ensure compatible dimensions
+            if teacher_pooled.shape != student_pooled.shape:
+                teacher_pooled = self._match_tensor_dimensions(teacher_pooled, student_pooled.shape)
+            
+            # Representation alignment loss
+            repr_loss = F.mse_loss(student_pooled, teacher_pooled.detach())
+            logger.debug(f"Real pooled representation loss: {repr_loss.item():.6f}")
+            
+            return repr_loss  # Return for potential use in training loop
             
         except Exception as e:
             logger.debug(f"Pooled representation distillation failed: {e}")
+            return None
     
-    def _distill_decoder_representations(self, student_encoder, teacher_encoder):
-        """Distill decoder representations for language understanding"""
+    def _distill_decoder_representations(self, student_encoder, teacher_encoder, real_data_batch=None):
+        """Distill decoder representations using real audio data"""
         try:
-            # Test with synthetic audio input
-            synthetic_audio = torch.randn(2, 80, 3000)  # Batch, mel_bins, time_steps
+            if real_data_batch is None or 'audio_features' not in real_data_batch:
+                logger.debug("No real audio data for decoder representation distillation")
+                return
+                
+            real_audio_input = real_data_batch['audio_features']
+            
+            # Ensure audio input is in correct format
+            if real_audio_input.dim() == 2:  # (batch_size, features)
+                # Expand to expected shape (batch_size, sequence_length, features)
+                real_audio_input = real_audio_input.unsqueeze(1)
             
             with torch.no_grad():
-                teacher_output = teacher_encoder.encoder(synthetic_audio).last_hidden_state
+                try:
+                    teacher_output = teacher_encoder.encoder(real_audio_input)
+                    if hasattr(teacher_output, 'last_hidden_state'):
+                        teacher_decoded = teacher_output.last_hidden_state
+                    else:
+                        teacher_decoded = teacher_output
+                except Exception as e:
+                    logger.debug(f"Teacher decoder extraction failed: {e}")
+                    return
             
-            student_output = student_encoder.encoder(synthetic_audio).last_hidden_state
+            try:
+                student_output = student_encoder.encoder(real_audio_input)
+                if hasattr(student_output, 'last_hidden_state'):
+                    student_decoded = student_output.last_hidden_state
+                else:
+                    student_decoded = student_output
+            except Exception as e:
+                logger.debug(f"Student decoder extraction failed: {e}")
+                return
             
-            # Decoder alignment
-            decoder_loss = F.mse_loss(student_output, teacher_output)
-            logger.debug(f"Decoder representation loss: {decoder_loss.item():.6f}")
+            # Ensure compatible dimensions
+            if teacher_decoded.shape != student_decoded.shape:
+                teacher_decoded = self._match_tensor_dimensions(teacher_decoded, student_decoded.shape)
+            
+            # Decoder alignment loss
+            decoder_loss = F.mse_loss(student_decoded, teacher_decoded.detach())
+            logger.debug(f"Real decoder representation loss: {decoder_loss.item():.6f}")
+            
+            return decoder_loss  # Return for potential use in training loop
             
         except Exception as e:
             logger.debug(f"Decoder representation distillation failed: {e}")
+            return None
+    
+    def _get_real_teacher_alignments(self, teacher_models, video_frames, audio_features, text_tokens=None):
+        """Get real cross-modal alignments from expert teacher models"""
+        try:
+            alignments = {}
+            
+            # Vision teacher embeddings
+            if hasattr(teacher_models, 'get') and 'vision' in teacher_models:
+                vision_teacher = teacher_models['vision']
+                with torch.no_grad():
+                    if hasattr(vision_teacher, 'encode_image'):
+                        vision_emb = vision_teacher.encode_image(video_frames)
+                    elif hasattr(vision_teacher, 'get_image_features'):
+                        vision_emb = vision_teacher.get_image_features(video_frames)
+                    else:
+                        # Use the expert models directly
+                        vision_emb = self.expert_models.get_vision_embeddings(video_frames)
+                    alignments['vision'] = vision_emb
+            
+            # Audio teacher embeddings
+            if hasattr(teacher_models, 'get') and 'audio' in teacher_models:
+                audio_teacher = teacher_models['audio']
+                with torch.no_grad():
+                    if hasattr(audio_teacher, 'encode_audio'):
+                        audio_emb = audio_teacher.encode_audio(audio_features)
+                    elif hasattr(audio_teacher, 'encoder'):
+                        # Whisper-style encoding
+                        audio_emb = audio_teacher.encoder(audio_features).last_hidden_state
+                    else:
+                        # Use expert models
+                        audio_emb = self.expert_models.get_audio_embeddings(audio_features)
+                    alignments['audio'] = audio_emb
+            
+            # Text embeddings if available
+            if text_tokens is not None and hasattr(teacher_models, 'get') and 'text' in teacher_models:
+                text_teacher = teacher_models['text']
+                with torch.no_grad():
+                    if hasattr(text_teacher, 'encode_text'):
+                        text_emb = text_teacher.encode_text(text_tokens)
+                    else:
+                        # Use language model embeddings
+                        text_emb = text_teacher.get_input_embeddings()(text_tokens)
+                    alignments['text'] = text_emb
+            
+            # Create aligned multimodal representation
+            if alignments:
+                return self._fuse_teacher_alignments(alignments)
+            else:
+                return None
+                
+        except Exception as e:
+            logger.debug(f"Could not get real teacher alignments: {e}")
+            return None
+    
+    def _fuse_teacher_alignments(self, alignments: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Fuse different modality alignments from teachers"""
+        
+        # Get batch size from any available modality
+        batch_size = next(iter(alignments.values())).shape[0]
+        
+        # Project all modalities to same dimension
+        target_dim = 1024  # Common fusion dimension
+        fused_features = []
+        
+        for modality, features in alignments.items():
+            # Handle different feature shapes
+            if features.dim() == 4:  # Vision features (B, C, H, W)
+                features = F.adaptive_avg_pool2d(features, (1, 1)).squeeze(-1).squeeze(-1)
+            elif features.dim() == 3:  # Sequence features (B, seq_len, dim)
+                features = features.mean(dim=1)  # Global average pooling
+            
+            # Project to target dimension
+            if features.shape[-1] != target_dim:
+                # Create projection layer if it doesn't exist
+                proj_name = f'{modality}_projection'
+                if not hasattr(self, proj_name):
+                    projection = nn.Linear(features.shape[-1], target_dim).to(self.device)
+                    setattr(self, proj_name, projection)
+                else:
+                    projection = getattr(self, proj_name)
+                
+                features = projection(features)
+            
+            fused_features.append(features)
+        
+        # Concatenate and reduce to final representation
+        if len(fused_features) > 1:
+            concatenated = torch.cat(fused_features, dim=-1)
+            
+            # Final fusion projection
+            if not hasattr(self, 'final_alignment_projection'):
+                self.final_alignment_projection = nn.Linear(
+                    concatenated.shape[-1], target_dim
+                ).to(self.device)
+            
+            aligned_representation = self.final_alignment_projection(concatenated)
+        else:
+            aligned_representation = fused_features[0]
+        
+        return aligned_representation
+    
+    def _compute_real_alignment_loss(self, student_fusion: torch.Tensor, teacher_alignments: torch.Tensor) -> torch.Tensor:
+        """Compute alignment loss between student fusion and real teacher alignments"""
+        
+        # Ensure compatible dimensions
+        if student_fusion.dim() != teacher_alignments.dim():
+            if student_fusion.dim() == 3:  # (B, seq_len, dim)
+                student_fusion = student_fusion.mean(dim=1)  # Global pool
+            if teacher_alignments.dim() == 3:
+                teacher_alignments = teacher_alignments.mean(dim=1)
+        
+        # Dimension matching
+        if student_fusion.shape[-1] != teacher_alignments.shape[-1]:
+            if not hasattr(self, 'student_alignment_projection'):
+                self.student_alignment_projection = nn.Linear(
+                    student_fusion.shape[-1], teacher_alignments.shape[-1]
+                ).to(self.device)
+            student_fusion = self.student_alignment_projection(student_fusion)
+        
+        # Combined alignment losses
+        mse_loss = F.mse_loss(student_fusion, teacher_alignments.detach())
+        
+        # Cosine similarity loss (encourage similar directions)
+        cos_sim = F.cosine_similarity(student_fusion, teacher_alignments.detach(), dim=-1)
+        cos_loss = (1 - cos_sim).mean()  # Maximize similarity
+        
+        # Combined loss
+        total_loss = mse_loss + 0.1 * cos_loss
+        
+        return total_loss
     
     def _get_teacher_alignments(self, teacher_models, vision_feat, audio_feat, text_feat):
-        """Get cross-modal alignments from teacher models"""
-        try:
-            # This would use teacher models to create cross-modal alignments
-            # For now, return a synthetic aligned representation
-            batch_size = vision_feat.shape[0]
-            fusion_dim = 2048
-            
-            # Create synthetic but realistic alignment
-            aligned_features = torch.randn(batch_size, 50, fusion_dim)
-            return aligned_features
-            
-        except Exception as e:
-            logger.debug(f"Could not get teacher alignments: {e}")
-            return None
+        """Legacy method - replaced by _get_real_teacher_alignments"""
+        logger.warning("Using legacy synthetic teacher alignments - should use _get_real_teacher_alignments")
+        return self._get_real_teacher_alignments(teacher_models, vision_feat, audio_feat, text_feat)

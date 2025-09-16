@@ -105,8 +105,29 @@ class AutonomousVideoEditor:
         
         logger.info(f"Loaded {len(frames)} frames")
         
-        # TODO: Load audio separately if needed
+        # Load audio separately using moviepy
         audio = None
+        try:
+            try:
+                import moviepy.editor as mp
+            except ImportError:
+                logger.warning("moviepy not available, skipping audio extraction")
+                return frames, fps, None
+                
+            video_clip = mp.VideoFileClip(video_path)
+            if video_clip.audio is not None:
+                # Extract audio as numpy array
+                audio_array = video_clip.audio.to_soundarray()
+                audio = {
+                    'data': audio_array,
+                    'fps': video_clip.audio.fps,
+                    'duration': video_clip.audio.duration
+                }
+                logger.info(f"Loaded audio: {audio_array.shape} at {video_clip.audio.fps} Hz")
+            video_clip.close()
+        except Exception as e:
+            logger.warning(f"Could not load audio from video: {e}")
+            audio = None
         
         return frames, fps, audio
     
@@ -232,11 +253,47 @@ class AutonomousVideoEditor:
             
         out.release()
         
-        # TODO: Add audio back if available
+        # Add audio back if available
         if audio is not None:
-            logger.info("Audio processing not implemented yet")
-            
-        logger.info(f"Video saved successfully: {output_path}")
+            try:
+                try:
+                    import moviepy.editor as mp
+                    import tempfile
+                except ImportError:
+                    logger.warning("moviepy not available, saving video without audio")
+                    return
+                
+                # Create temporary video file without audio
+                temp_video = tempfile.mktemp(suffix='.mp4')
+                fourcc_temp = cv2.VideoWriter_fourcc(*'mp4v')
+                temp_out = cv2.VideoWriter(temp_video, fourcc_temp, fps, (width, height))
+                
+                for frame in frames:
+                    temp_out.write(frame)
+                temp_out.release()
+                
+                # Load the temporary video and add audio
+                video_clip = mp.VideoFileClip(temp_video)
+                
+                # Create audio clip from numpy array
+                audio_clip = mp.AudioArrayClip(audio['data'], fps=audio['fps'])
+                
+                # Combine video and audio
+                final_clip = video_clip.set_audio(audio_clip)
+                final_clip.write_videofile(output_path, codec='libx264', audio_codec='aac')
+                
+                # Cleanup
+                video_clip.close()
+                audio_clip.close()
+                final_clip.close()
+                os.unlink(temp_video)
+                
+                logger.info(f"Video with audio saved successfully: {output_path}")
+                
+            except Exception as e:
+                logger.warning(f"Could not add audio to video, saving video only: {e}")
+        else:
+            logger.info(f"Video saved successfully: {output_path}")
     
     def get_available_effects(self) -> List[str]:
         """Get list of available effects"""
@@ -251,7 +308,7 @@ class AutonomousVideoEditor:
 
 def quick_edit(video_path: str, prompt: str, output_path: str, config: Optional[Dict] = None):
     """Quick video editing function"""
-    from .effect_generator import AdvancedEffectGenerator
+    from ..generation.effect_generator import AdvancedEffectGenerator
     
     if config is None:
         config = {'effects': {'quality': 'high', 'gpu_acceleration': True}}

@@ -7,7 +7,10 @@ import os
 import subprocess
 import requests
 import logging
-from typing import Dict, List, Optional
+import shutil
+import hashlib
+import time
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import yaml
 import json
@@ -185,16 +188,13 @@ echo "💡 Use CLIP features instead: python -c 'from src.utils.dataset_manager 
         }
         
         for filename, url in files_to_download.items():
-            try:
-                response = requests.get(url)
-                if response.status_code == 200:
-                    with open(audioset_dir / filename, 'wb') as f:
-                        f.write(response.content)
-                    logger.info(f"✅ Downloaded {filename}")
-                else:
-                    logger.warning(f"⚠️  Could not download {filename}: {response.status_code}")
-            except Exception as e:
-                logger.error(f"❌ Failed to download {filename}: {e}")
+            filepath = audioset_dir / filename
+            if not filepath.exists():  # Skip if already downloaded
+                success = self.download_with_progress(url, filepath, f"AudioSet {filename}")
+                if not success:
+                    logger.warning(f"⚠️  Could not download {filename}")
+            else:
+                logger.info(f"✅ {filename} already exists")
         
         # Create download instructions
         instructions = '''
@@ -248,14 +248,13 @@ Note: Some YouTube videos may no longer be available.
         }
         
         for filename, url in metadata_files.items():
-            try:
-                response = requests.get(url)
-                if response.status_code == 200:
-                    with open(yt8m_dir / filename, 'wb') as f:
-                        f.write(response.content)
-                    logger.info(f"✅ Downloaded {filename}")
-            except Exception as e:
-                logger.warning(f"⚠️  Could not download {filename}: {e}")
+            filepath = yt8m_dir / filename
+            if not filepath.exists():  # Skip if already downloaded
+                success = self.download_with_progress(url, filepath, f"YouTube-8M {filename}")
+                if not success:
+                    logger.warning(f"⚠️  Could not download {filename}")
+            else:
+                logger.info(f"✅ {filename} already exists")
         
         # Create download instructions
         instructions = '''
@@ -450,26 +449,77 @@ python download_videos.py --version 1.3
         logger.info(f"✅ Dataset configuration saved to {config_path}")
         return str(config_path)
     
-    def setup_all_datasets(self):
-        """Setup all major datasets"""
+    def setup_all_datasets(self, skip_existing: bool = True, verify_after: bool = True):
+        """Setup all major datasets with verification"""
         logger.info("🚀 Setting up all major video/audio datasets...")
+        
+        # Check disk space
+        required_space_gb = 10.0  # Minimum space for metadata and repos
+        sufficient_space, available_gb = self.check_disk_space(required_space_gb)
+        
+        if not sufficient_space:
+            logger.warning(f"⚠️  Low disk space: {available_gb:.1f}GB available, {required_space_gb}GB recommended")
+        else:
+            logger.info(f"💾 Disk space check: {available_gb:.1f}GB available")
         
         results = {}
         
+        # Check existing installations if requested
+        if skip_existing:
+            logger.info("🔍 Checking existing installations...")
+            verification = self.verify_all_datasets()
+            
+            datasets_to_setup = []
+            for dataset_name, status in verification.items():
+                if status["status"] != "ready":
+                    datasets_to_setup.append(dataset_name)
+                else:
+                    logger.info(f"✅ {dataset_name} already ready, skipping")
+            
+            if not datasets_to_setup:
+                logger.info("🎉 All datasets already set up!")
+                return {"message": "All datasets ready", "verification": verification}
+        else:
+            datasets_to_setup = list(self.datasets.keys())
+        
         # Setup each dataset
-        results['webvid_features'] = self.download_webvid_features()
-        results['audioset'] = self.download_audioset_metadata()
-        results['youtube8m'] = self.download_youtube8m_metadata()
-        results['activitynet'] = self.download_activitynet()
-        results['summarization'] = self.download_summarization_datasets()
+        if "webvid10m" in datasets_to_setup:
+            logger.info("📦 Setting up WebVid10M...")
+            results['webvid_features'] = self.download_webvid_features()
+            self.setup_video2dataset()
+            
+        if "audioset" in datasets_to_setup:
+            logger.info("📦 Setting up AudioSet...")
+            results['audioset'] = self.download_audioset_metadata()
+            
+        if "youtube8m" in datasets_to_setup:
+            logger.info("📦 Setting up YouTube-8M...")
+            results['youtube8m'] = self.download_youtube8m_metadata()
+            
+        if "activitynet" in datasets_to_setup:
+            logger.info("📦 Setting up ActivityNet...")
+            results['activitynet'] = self.download_activitynet()
+            
+        if any(ds in datasets_to_setup for ds in ["tvsum", "summe"]):
+            logger.info("📦 Setting up summarization datasets...")
+            results['summarization'] = self.download_summarization_datasets()
         
         # Create unified configuration
+        logger.info("⚙️  Creating dataset configuration...")
         results['config'] = self.create_dataset_config()
         
-        # Setup video2dataset
-        self.setup_video2dataset()
+        # Final verification if requested
+        if verify_after:
+            logger.info("🔍 Final verification...")
+            verification = self.verify_all_datasets()
+            results['verification'] = verification
+            
+            ready_count = sum(1 for v in verification.values() if v["status"] == "ready")
+            total_count = len(verification)
+            
+            logger.info(f"📊 Setup Summary: {ready_count}/{total_count} datasets ready")
         
-        logger.info("✅ All datasets setup completed!")
+        logger.info("✅ Dataset setup completed!")
         return results
     
     def get_dataset_stats(self):
@@ -489,6 +539,159 @@ python download_videos.py --version 1.3
             "storage_needed": "~55TB raw videos, ~5TB features"
         }
         return stats
+    
+    def verify_dataset_installation(self, dataset_name: str) -> Dict[str, any]:
+        """Verify if a dataset is properly installed and accessible"""
+        
+        if dataset_name not in self.datasets:
+            return {"status": "error", "message": f"Unknown dataset: {dataset_name}"}
+        
+        dataset_info = self.datasets[dataset_name]
+        results = {
+            "dataset": dataset_name,
+            "status": "checking",
+            "components": {},
+            "recommendations": []
+        }
+        
+        if dataset_name == "webvid10m":
+            webvid_dir = self.data_root / "webvid10m"
+            clip_features_dir = webvid_dir / "clip_features"
+            scripts_dir = self.data_root / "scripts"
+            
+            results["components"]["base_directory"] = webvid_dir.exists()
+            results["components"]["clip_features"] = clip_features_dir.exists()
+            results["components"]["download_script"] = (scripts_dir / "download_webvid.sh").exists()
+            
+            if not clip_features_dir.exists():
+                results["recommendations"].append("Run download_webvid_features() to get CLIP features")
+            
+        elif dataset_name == "audioset":
+            audioset_dir = self.data_root / "audioset"
+            required_files = [
+                "eval_segments.csv", "balanced_train_segments.csv", 
+                "unbalanced_train_segments.csv", "class_labels_indices.csv",
+                "ontology.json"
+            ]
+            
+            results["components"]["base_directory"] = audioset_dir.exists()
+            for file in required_files:
+                results["components"][file] = (audioset_dir / file).exists()
+            
+            missing_files = [f for f in required_files if not (audioset_dir / f).exists()]
+            if missing_files:
+                results["recommendations"].append(f"Missing metadata files: {missing_files}")
+            
+        elif dataset_name == "youtube8m":
+            yt8m_dir = self.data_root / "youtube8m"
+            results["components"]["base_directory"] = yt8m_dir.exists()
+            results["components"]["repository"] = (yt8m_dir / "youtube-8m").exists()
+            results["components"]["vocabulary"] = (yt8m_dir / "vocabulary.csv").exists()
+            
+            if not (yt8m_dir / "youtube-8m").exists():
+                results["recommendations"].append("Repository not cloned - run download_youtube8m_metadata()")
+            
+        elif dataset_name == "activitynet":
+            activitynet_dir = self.data_root / "activitynet"
+            results["components"]["base_directory"] = activitynet_dir.exists()
+            results["components"]["repository"] = (activitynet_dir / "ActivityNet").exists()
+            
+            if not (activitynet_dir / "ActivityNet").exists():
+                results["recommendations"].append("Repository not cloned - run download_activitynet()")
+        
+        elif dataset_name in ["tvsum", "summe"]:
+            summ_dir = self.data_root / "summarization"
+            if dataset_name == "tvsum":
+                repo_path = summ_dir / "tvsum" / "tvsum"
+            else:
+                repo_path = summ_dir / "summe" / "gm_submodular"
+            
+            results["components"]["base_directory"] = summ_dir.exists()
+            results["components"]["repository"] = repo_path.exists()
+            
+            if not repo_path.exists():
+                results["recommendations"].append(f"Repository not cloned - run download_summarization_datasets()")
+        
+        # Overall status
+        all_components_ok = all(results["components"].values())
+        results["status"] = "ready" if all_components_ok else "incomplete"
+        
+        return results
+    
+    def verify_all_datasets(self) -> Dict[str, Dict]:
+        """Verify all dataset installations"""
+        verification_results = {}
+        
+        logger.info("🔍 Verifying all dataset installations...")
+        
+        for dataset_name in self.datasets.keys():
+            verification_results[dataset_name] = self.verify_dataset_installation(dataset_name)
+            status = verification_results[dataset_name]["status"]
+            
+            if status == "ready":
+                logger.info(f"✅ {dataset_name}: Ready")
+            elif status == "incomplete":
+                logger.warning(f"⚠️  {dataset_name}: Incomplete")
+                for rec in verification_results[dataset_name]["recommendations"]:
+                    logger.info(f"   💡 {rec}")
+            else:
+                logger.error(f"❌ {dataset_name}: Error")
+        
+        return verification_results
+    
+    def download_with_progress(self, url: str, filepath: Path, description: str = "Downloading") -> bool:
+        """Download a file with progress tracking"""
+        
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(filepath, 'wb') as file:
+                downloaded = 0
+                start_time = time.time()
+                
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        file.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Show progress every 1MB
+                        if downloaded % (1024 * 1024) == 0 or downloaded == total_size:
+                            if total_size > 0:
+                                percentage = (downloaded / total_size) * 100
+                                elapsed = time.time() - start_time
+                                speed = downloaded / (1024 * 1024 * elapsed) if elapsed > 0 else 0
+                                
+                                logger.info(
+                                    f"  📥 {description}: {percentage:.1f}% "
+                                    f"({downloaded / (1024*1024):.1f}MB / {total_size / (1024*1024):.1f}MB) "
+                                    f"@ {speed:.1f}MB/s"
+                                )
+            
+            logger.info(f"✅ {description} completed: {filepath.name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to download {filepath.name}: {e}")
+            if filepath.exists():
+                filepath.unlink()  # Clean up partial download
+            return False
+    
+    def check_disk_space(self, required_gb: float) -> Tuple[bool, float]:
+        """Check if sufficient disk space is available"""
+        
+        try:
+            statvfs = os.statvfs(self.data_root)
+            available_bytes = statvfs.f_frsize * statvfs.f_bavail
+            available_gb = available_bytes / (1024**3)
+            
+            return available_gb >= required_gb, available_gb
+            
+        except Exception as e:
+            logger.warning(f"Could not check disk space: {e}")
+            return True, 0.0  # Assume enough space if we can't check
 
 
 def create_dataset_download_script():
@@ -554,8 +757,69 @@ if __name__ == "__main__":
 
 
 if __name__ == "__main__":
-    # Quick test
-    dm = VideoDatasetManager()
-    print("🎬 Available Datasets:")
-    for name, info in dm.list_datasets().items():
-        print(f"  • {info['name']}: {info['description']} ({info['size']})")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Video Dataset Manager for Autonomous Video Editor")
+    parser.add_argument("--action", choices=["list", "setup", "verify", "stats"], 
+                       default="list", help="Action to perform")
+    parser.add_argument("--datasets", nargs="+", 
+                       help="Specific datasets to work with (default: all)")
+    parser.add_argument("--data-dir", default="data", 
+                       help="Data root directory")
+    parser.add_argument("--force", action="store_true",
+                       help="Force re-setup even if datasets exist")
+    parser.add_argument("--no-verify", action="store_true",
+                       help="Skip verification after setup")
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
+    # Initialize dataset manager
+    dm = VideoDatasetManager(args.data_dir)
+    
+    if args.action == "list":
+        print("🎬 Available Datasets:")
+        for name, info in dm.list_datasets().items():
+            print(f"  • {info['name']}: {info['description']} ({info['size']})")
+            
+    elif args.action == "stats":
+        stats = dm.get_dataset_stats()
+        print("📊 Dataset Statistics:")
+        print(f"  Total datasets: {stats['total_datasets']}")
+        print(f"  Total videos: {stats['total_videos']}")  
+        print(f"  Total hours: {stats['total_hours']}")
+        print(f"  Storage needed: {stats['storage_needed']}")
+        print("\nEstimated sizes:")
+        for dataset, size in stats['estimated_size'].items():
+            print(f"  • {dataset}: {size}")
+            
+    elif args.action == "verify":
+        verification = dm.verify_all_datasets()
+        print("🔍 Dataset Verification Results:")
+        
+        for dataset, result in verification.items():
+            status_icon = "✅" if result["status"] == "ready" else "⚠️" if result["status"] == "incomplete" else "❌"
+            print(f"  {status_icon} {dataset}: {result['status']}")
+            
+            if result["recommendations"]:
+                for rec in result["recommendations"]:
+                    print(f"    💡 {rec}")
+                    
+    elif args.action == "setup":
+        setup_results = dm.setup_all_datasets(
+            skip_existing=not args.force,
+            verify_after=not args.no_verify
+        )
+        
+        print("✅ Setup completed!")
+        if 'verification' in setup_results:
+            verification = setup_results['verification']
+            ready_count = sum(1 for v in verification.values() if v["status"] == "ready")
+            total_count = len(verification)
+            print(f"📊 Final status: {ready_count}/{total_count} datasets ready")
