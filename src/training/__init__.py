@@ -2,8 +2,9 @@
 Training modules and utilities
 """
 
-from .trainer import MultiModalTrainer
-
-__all__ = [
-    "MultiModalTrainer"
-]
+try:
+    from .trainer import MultiModalTrainer
+    __all__ = ["MultiModalTrainer"]
+except ImportError:
+    # Handle gracefully when running modules directly
+    __all__ = []

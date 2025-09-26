@@ -123,3 +123,11 @@ pre-commit>=3.4.0
 diffusers>=0.21.4
 controlnet-aux>=0.0.6
 xformers>=0.0.22  # Memory efficient attention
+
+# Enhanced self-coding and advanced teacher models
+scikit-image>=0.21.0  # For enhanced image processing in SafeCodeExecutor
+evaluate>=0.4.0  # For model evaluation metrics in CodeLLaMA fine-tuning
+uuid>=1.30  # For temp asset management (usually built-in)
+
+# Note: Advanced teacher models (RT-DETR, HQ-SAM, BeatNet, Demucs) use 
+# fallback implementations with existing dependencies for broader compatibility

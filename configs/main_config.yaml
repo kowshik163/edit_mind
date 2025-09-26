@@ -15,6 +15,15 @@ teachers:
     - openai/whisper-large-v3
     - Qwen/Qwen2-Audio
   fusion_model: Qwen/Qwen2.5-VL-72B
+  
+  # Advanced teacher models for enhanced distillation
+  object_detection: RT-DETR/rtdetr-resnet50  # Real-time object detection
+  segmentation: HQ-SAM/sam-hq-vit-h  # High-quality segmentation
+  music_analysis: BeatNet/beatnet  # Music structure and rhythm
+  audio_separation: Demucs/htdemucs  # Audio source separation
+  
+  # Self-coding teacher model
+  code_generation: codellama/CodeLlama-13b-Python-hf
 
 students:
   text_model: microsoft/phi-3-mini-4k-instruct
@@ -27,12 +36,24 @@ students:
 distillation:
   strategies:
     - feature_matching   # Align internal embeddings
-    - logit_matching     # Soft targets (probability distillation)
+    - logit_matching     # Soft targets (probability distillation)  
     - multimodal_alignment # Contrastive loss across text, video, audio
+    - spatial_understanding # RT-DETR object detection knowledge
+    - segmentation_knowledge # HQ-SAM fine boundary understanding  
+    - rhythmic_understanding # BeatNet music structure knowledge
+    - audio_separation # Demucs source separation knowledge
   temperature: 2.0
   alpha: 0.5   # trade-off between hard vs soft labels
   batch_size: 16
   learning_rate: 3e-5
+  
+  # Enhanced distillation settings
+  advanced_teachers:
+    enable_rt_detr: true
+    enable_hq_sam: true  
+    enable_beatnet: true
+    enable_demucs: true
+    fallback_models: true  # Use fallback implementations if advanced models unavailable
 
 finetuning:
   method: qlora   # parameter-efficient fine-tuning
@@ -48,6 +69,44 @@ rlhf:
   method: ppo
   rollout_batch_size: 32
   learning_rate: 1e-6
+
+# Enhanced self-coding configuration
+self_coding:
+  model_name: codellama/CodeLlama-7b-Python-hf
+  device: auto  # auto-detect CUDA/CPU
+  max_length: 1024
+  
+  # Fine-tuning configuration for video effects
+  fine_tuning:
+    enable: true
+    output_dir: ./checkpoints/codellama-video-effects
+    num_epochs: 3
+    batch_size: 4
+    learning_rate: 2e-5
+    warmup_steps: 100
+    
+    # Training data sources
+    data_sources:
+      - video_effects_scripts
+      - professional_editing
+      - curated_examples
+      
+  # Safe code execution
+  execution:
+    max_execution_time: 30  # seconds
+    max_temp_files: 10
+    allowed_modules:
+      - numpy
+      - cv2
+      - PIL
+      - moviepy.editor
+      - subprocess
+      - tempfile
+    
+    # Multi-step execution capabilities  
+    enable_multi_step: true
+    enable_ffmpeg_integration: true
+    enable_asset_generation: true
   epochs: 3
 
 datasets:

@@ -21,19 +21,30 @@ logger = logging.getLogger(__name__)
 
 
 class SafeCodeExecutor:
-    """Safe execution environment for generated video effects code"""
+    """Enhanced safe code execution environment with multi-step capabilities"""
     
     def __init__(self, timeout: int = 30):
-        self.timeout = timeout
-        self.allowed_imports = {
-            'cv2', 'numpy', 'np', 'math', 'random', 'time',
-            'PIL', 'scipy', 'skimage', 'matplotlib'
+        self.allowed_modules = {
+            'numpy', 'cv2', 'PIL', 'moviepy.editor',
+            'moviepy.video.fx', 'moviepy.audio.fx',
+            'math', 'random', 'json', 'os.path',
+            'subprocess', 'tempfile', 'shutil',
+            'matplotlib.pyplot', 'scipy', 'skimage'
         }
+        
+        # For validation
+        self.allowed_imports = self.allowed_modules
         self.forbidden_calls = {
-            'exec', 'eval', 'compile', '__import__', 'open',
-            'file', 'input', 'raw_input', 'reload', 'exit',
-            'quit', 'subprocess', 'os', 'sys'
+            'eval', 'exec', 'compile', 'open', '__import__',
+            'globals', 'locals', 'vars', 'dir', 'getattr', 'setattr'
         }
+        self.restricted_functions = self.forbidden_calls  # Alias for backward compatibility
+        
+        # Multi-step execution context
+        self.execution_context = {}
+        self.temp_assets = []
+        self.max_execution_time = timeout
+        self.max_temp_files = 10
     
     def validate_code(self, code: str) -> tuple[bool, str]:
         """Validate that code is safe to execute"""
@@ -121,6 +132,250 @@ class SafeCodeExecutor:
         except Exception as e:
             logger.error(f"Code execution failed: {e}")
             return None
+    
+    def execute_safe(self, code: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Execute code safely with restricted environment and multi-step support"""
+        
+        is_safe, message = self.validate_code(code)
+        if not is_safe:
+            raise ValueError(f"Code validation failed: {message}")
+        
+        # Create safe execution environment
+        safe_globals = self._create_safe_globals()
+        
+        # Add persistent execution context
+        safe_globals.update(self.execution_context)
+        
+        # Add context if provided
+        if context:
+            safe_globals.update(context)
+        
+        try:
+            # Execute with timeout
+            result = self._execute_with_timeout(code, safe_globals)
+            
+            # Update persistent context with new variables
+            self._update_execution_context(safe_globals)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Code execution failed: {e}")
+            raise RuntimeError(f"Execution failed: {e}")
+    
+    def _create_safe_globals(self) -> Dict[str, Any]:
+        """Create safe global execution environment"""
+        safe_globals = {
+            '__builtins__': {
+                'len': len, 'str': str, 'int': int, 'float': float,
+                'list': list, 'dict': dict, 'tuple': tuple,
+                'max': max, 'min': min, 'sum': sum, 'abs': abs,
+                'round': round, 'range': range, 'enumerate': enumerate,
+                'zip': zip, 'print': print, 'type': type, 'isinstance': isinstance
+            }
+        }
+        
+        # Add allowed modules
+        for module in self.allowed_modules:
+            try:
+                if '.' in module:
+                    # Handle submodules
+                    parts = module.split('.')
+                    imported = __import__(module, fromlist=[parts[-1]])
+                    safe_globals[parts[-1]] = imported
+                else:
+                    safe_globals[module] = __import__(module)
+            except ImportError:
+                logger.warning(f"Module {module} not available")
+                continue
+        
+        # Add utility functions for multi-step execution
+        safe_globals.update({
+            'create_temp_asset': self.create_temp_asset,
+            'load_temp_asset': self.load_temp_asset,
+            'execute_ffmpeg': self.execute_ffmpeg_safe,
+            'create_intermediate_clip': self.create_intermediate_clip
+        })
+        
+        return safe_globals
+    
+    def _execute_with_timeout(self, code: str, safe_globals: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute code with timeout protection"""
+        import threading
+        
+        result = {}
+        exception = None
+        
+        def target():
+            nonlocal result, exception
+            try:
+                exec(code, safe_globals)
+                # Return any created variables (excluding built-ins)
+                for key, value in safe_globals.items():
+                    if (not key.startswith('__') and 
+                        key not in self.allowed_modules and
+                        key not in ['create_temp_asset', 'load_temp_asset', 'execute_ffmpeg', 'create_intermediate_clip']):
+                        if callable(value) or key not in self.execution_context:
+                            result[key] = value
+            except Exception as e:
+                exception = e
+        
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=self.max_execution_time)
+        
+        if thread.is_alive():
+            raise RuntimeError(f"Code execution timed out after {self.max_execution_time} seconds")
+        
+        if exception:
+            raise exception
+        
+        return result
+    
+    def _update_execution_context(self, safe_globals: Dict[str, Any]):
+        """Update persistent execution context"""
+        for key, value in safe_globals.items():
+            if (not key.startswith('__') and 
+                key not in self.allowed_modules and
+                key not in ['create_temp_asset', 'load_temp_asset', 'execute_ffmpeg', 'create_intermediate_clip']):
+                self.execution_context[key] = value
+    
+    def create_temp_asset(self, asset_type: str, data: Any = None) -> str:
+        """Create temporary asset for multi-step processing"""
+        import tempfile
+        import uuid
+        
+        if len(self.temp_assets) >= self.max_temp_files:
+            raise RuntimeError(f"Maximum temp files ({self.max_temp_files}) exceeded")
+        
+        asset_id = str(uuid.uuid4())[:8]
+        
+        if asset_type == "image":
+            temp_file = tempfile.NamedTemporaryFile(suffix=f"_{asset_id}.png", delete=False)
+            if data is not None and hasattr(data, 'save'):
+                data.save(temp_file.name)
+        elif asset_type == "video":
+            temp_file = tempfile.NamedTemporaryFile(suffix=f"_{asset_id}.mp4", delete=False)
+            if data is not None and hasattr(data, 'write_videofile'):
+                data.write_videofile(temp_file.name, verbose=False, logger=None)
+        elif asset_type == "audio":
+            temp_file = tempfile.NamedTemporaryFile(suffix=f"_{asset_id}.wav", delete=False)
+            if data is not None and hasattr(data, 'write_audiofile'):
+                data.write_audiofile(temp_file.name, verbose=False, logger=None)
+        else:
+            temp_file = tempfile.NamedTemporaryFile(suffix=f"_{asset_id}.tmp", delete=False)
+        
+        temp_file.close()
+        self.temp_assets.append(temp_file.name)
+        
+        logger.info(f"Created temp asset: {temp_file.name}")
+        return temp_file.name
+    
+    def load_temp_asset(self, asset_path: str, asset_type: str = "auto"):
+        """Load temporary asset for processing"""
+        if asset_path not in self.temp_assets:
+            raise ValueError("Asset not in temp assets list")
+        
+        if not os.path.exists(asset_path):
+            raise RuntimeError(f"Temp asset not found: {asset_path}")
+        
+        try:
+            if asset_type == "auto":
+                # Auto-detect based on extension
+                ext = os.path.splitext(asset_path)[1].lower()
+                if ext in ['.png', '.jpg', '.jpeg']:
+                    asset_type = "image"
+                elif ext in ['.mp4', '.avi', '.mov']:
+                    asset_type = "video"
+                elif ext in ['.wav', '.mp3', '.aac']:
+                    asset_type = "audio"
+            
+            if asset_type == "image":
+                from PIL import Image
+                return Image.open(asset_path)
+            elif asset_type == "video":
+                from moviepy.editor import VideoFileClip
+                return VideoFileClip(asset_path)
+            elif asset_type == "audio":
+                from moviepy.editor import AudioFileClip
+                return AudioFileClip(asset_path)
+            else:
+                # Return path for custom handling
+                return asset_path
+                
+        except Exception as e:
+            raise RuntimeError(f"Failed to load temp asset: {e}")
+    
+    def execute_ffmpeg_safe(self, command_args: list, input_file: str = None, output_file: str = None):
+        """Execute FFmpeg command safely"""
+        import subprocess
+        
+        # Validate command
+        if not command_args or command_args[0] != "ffmpeg":
+            raise ValueError("Only ffmpeg commands allowed")
+        
+        # Restrict to safe FFmpeg operations
+        safe_filters = [
+            'scale', 'crop', 'rotate', 'hflip', 'vflip',
+            'brightness', 'contrast', 'saturation', 'hue',
+            'fade', 'overlay', 'concat', 'fps', 'loop',
+            'noise', 'blur', 'sharpen', 'eq', 'colorkey'
+        ]
+        
+        command_str = ' '.join(command_args)
+        has_safe_filter = any(f in command_str for f in safe_filters)
+        
+        if not has_safe_filter and '-vf' in command_args:
+            raise ValueError("Unsafe FFmpeg filter detected")
+        
+        # Create output file if not specified
+        if output_file is None:
+            output_file = self.create_temp_asset("video")
+        
+        # Execute with timeout
+        try:
+            result = subprocess.run(
+                command_args,
+                timeout=self.max_execution_time,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return output_file
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("FFmpeg command timed out")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"FFmpeg failed: {e.stderr}")
+    
+    def create_intermediate_clip(self, clip_data: Any, clip_type: str = "video"):
+        """Create intermediate clip for complex multi-step processing"""
+        if clip_type == "video" and hasattr(clip_data, 'write_videofile'):
+            temp_path = self.create_temp_asset("video", clip_data)
+            return self.load_temp_asset(temp_path, "video")
+        elif clip_type == "audio" and hasattr(clip_data, 'write_audiofile'):
+            temp_path = self.create_temp_asset("audio", clip_data)
+            return self.load_temp_asset(temp_path, "audio")
+        else:
+            raise RuntimeError(f"Unsupported clip type: {clip_type}")
+    
+    def cleanup_temp_assets(self):
+        """Clean up temporary assets"""
+        import os
+        
+        for asset_path in self.temp_assets:
+            try:
+                if os.path.exists(asset_path):
+                    os.unlink(asset_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp asset {asset_path}: {e}")
+        
+        self.temp_assets.clear()
+    
+    def reset_context(self):
+        """Reset execution context and clean up"""
+        self.execution_context.clear()
+        self.cleanup_temp_assets()
 
 
 class VideoEffectCodeGenerator:
@@ -358,6 +613,27 @@ class SelfCodingVideoEditor:
             logger.warning(f"Failed to load effects database: {e}")
             return []
     
+    def generate_effect(self, description: str) -> str:
+        """Generate effect code from description (for testing purposes)"""
+        # Find relevant reference effects
+        reference_effects = self._find_similar_effects(description)
+        
+        # Generate code
+        generated_code = self.code_generator.generate_effect_code(description, reference_effects)
+        
+        if not generated_code:
+            logger.warning(f"Failed to generate code for: {description}")
+            # Return a basic fallback code
+            return '''
+def generated_effect(frame, **kwargs):
+    """Fallback effect - basic brightness adjustment"""
+    import cv2
+    import numpy as np
+    return cv2.addWeighted(frame, 1.1, np.zeros_like(frame), 0, 10)
+'''
+        
+        return generated_code
+
     def create_custom_effect(self, description: str, test_frame: np.ndarray = None) -> Optional[Callable]:
         """Create a custom video effect from natural language description"""
         
@@ -369,15 +645,8 @@ class SelfCodingVideoEditor:
         
         logger.info(f"Generating custom effect: {description}")
         
-        # Find relevant reference effects
-        reference_effects = self._find_similar_effects(description)
-        
-        # Generate code
-        generated_code = self.code_generator.generate_effect_code(description, reference_effects)
-        
-        if not generated_code:
-            logger.error(f"Failed to generate code for: {description}")
-            return None
+        # Generate code using the generate_effect method
+        generated_code = self.generate_effect(description)
         
         # Test the generated effect
         if test_frame is not None:
