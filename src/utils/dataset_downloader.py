@@ -46,17 +46,29 @@ class DatasetDownloader:
                 "video_col": "contentUrl",
                 "text_col": "name",
                 "sample_limit": 10000,  # Limit for demo
-                "processor": self._process_webvid
+                "processor": lambda *args, **kwargs: self._process_webvid(*args, **kwargs)
+            },
+            "howto100m": {
+                "name": "HowTo100M",
+                "urls": [
+                    "https://www.di.ens.fr/willow/research/howto100m/HowTo100M_v1.csv"
+                ],
+                "type": "csv",
+                "video_col": "video_id",
+                "text_col": "text",
+                "sample_limit": 50000,  # Large scale dataset
+                "processor": lambda *args, **kwargs: self._process_howto100m(*args, **kwargs)
             },
             "audioset": {
                 "name": "AudioSet", 
                 "urls": [
                     "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/balanced_train_segments.csv",
-                    "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/eval_segments.csv"
+                    "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/eval_segments.csv",
+                    "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/unbalanced_train_segments.csv"
                 ],
                 "type": "csv",
-                "sample_limit": 5000,
-                "processor": self._process_audioset
+                "sample_limit": 20000,  # Increased for better training
+                "processor": lambda *args, **kwargs: self._process_audioset(*args, **kwargs)
             },
             "activitynet": {
                 "name": "ActivityNet",
@@ -64,8 +76,80 @@ class DatasetDownloader:
                     "http://ec2-52-25-205-214.us-west-2.compute.amazonaws.com/files/activity_net.v1-3.min.json"
                 ],
                 "type": "json",
+                "sample_limit": 5000,  # Increased
+                "processor": lambda *args, **kwargs: self._process_activitynet(*args, **kwargs)
+            },
+            "ave_dataset": {
+                "name": "Anatomy of Video Editing (AVE)",
+                "urls": [
+                    "https://github.com/jponttuset/shot-detection-papers/raw/master/data/AVE_dataset.json"
+                ],
+                "type": "json", 
+                "sample_limit": 1000,
+                "processor": lambda *args, **kwargs: self._process_ave_dataset(*args, **kwargs)
+            },
+            "v3c1": {
+                "name": "V3C1 Dataset",
+                "urls": [
+                    "https://www.robots.ox.ac.uk/~vgg/data/v3c1/v3c1_meta.csv"
+                ],
+                "type": "csv",
+                "sample_limit": 15000,
+                "processor": lambda *args, **kwargs: self._process_v3c1(*args, **kwargs)
+            },
+            "reddit_editors": {
+                "name": "Reddit r/editors Posts",
+                "urls": [
+                    "https://api.pushshift.io/reddit/search/submission/?subreddit=editors&size=1000",
+                    "https://api.pushshift.io/reddit/search/submission/?subreddit=videoediting&size=1000",
+                    "https://api.pushshift.io/reddit/search/submission/?subreddit=editing&size=1000"
+                ],
+                "type": "reddit_api",
+                "sample_limit": 3000,
+                "processor": lambda *args, **kwargs: self._process_reddit_editors(*args, **kwargs)
+            },
+            "youtube_tutorials": {
+                "name": "YouTube Editing Tutorials",
+                "urls": [],  # Will be populated dynamically
+                "type": "youtube_channels",
+                "channels": [
+                    "UC8YmHryGLCkcE3KJop1d5Gg",  # Premiere Gal
+                    "UC7O6CntQoAI-wYyJxYiqNUg",  # Justin Odisho  
+                    "UCmXmlB4-HJytD7wek0Uo97A",  # Peter McKinnon
+                    "UCQVD_BLufkoKQnWIPaUOagA"   # Matti Haapoja
+                ],
                 "sample_limit": 2000,
-                "processor": self._process_activitynet
+                "processor": lambda *args, **kwargs: self._process_youtube_tutorials(*args, **kwargs)
+            },
+            "kaggle_video_editing": {
+                "name": "Kaggle Video Editing Datasets",
+                "urls": [
+                    "https://www.kaggle.com/datasets/gowrishankarp/camera-movements-and-angles-dataset",
+                    "https://www.kaggle.com/datasets/kmader/film-grain-database"
+                ],
+                "type": "kaggle",
+                "sample_limit": 5000,
+                "processor": lambda *args, **kwargs: self._process_kaggle_datasets(*args, **kwargs)
+            },
+            "video_effects_scripts": {
+                "name": "Video Effects Code Dataset",
+                "urls": [
+                    "https://github.com/search?q=ffmpeg+effects+language%3APython&type=code",
+                    "https://github.com/search?q=opencv+video+effects+language%3APython&type=code"
+                ],
+                "type": "code_repository", 
+                "sample_limit": 10000,
+                "processor": lambda *args, **kwargs: self._process_video_effects_code(*args, **kwargs)
+            },
+            "professional_editing": {
+                "name": "Professional Editing Patterns",
+                "urls": [
+                    "https://www.editingmentor.com/data/patterns.json",
+                    "https://filmschoolonline.com/editing-techniques.json"
+                ],
+                "type": "json",
+                "sample_limit": 1000, 
+                "processor": lambda *args, **kwargs: self._process_professional_editing(*args, **kwargs)
             },
             "tvsum": {
                 "name": "TVSum",
@@ -74,7 +158,7 @@ class DatasetDownloader:
                 ],
                 "type": "tgz",
                 "sample_limit": 500,
-                "processor": self._process_tvsum
+                "processor": lambda *args, **kwargs: self._process_tvsum(*args, **kwargs)
             },
             "summe": {
                 "name": "SumMe",
@@ -83,7 +167,7 @@ class DatasetDownloader:
                 ],
                 "type": "zip", 
                 "sample_limit": 500,
-                "processor": self._process_summe
+                "processor": lambda *args, **kwargs: self._process_summe(*args, **kwargs)
             }
         }
         
@@ -92,6 +176,9 @@ class DatasetDownloader:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        
+        # Initialize enhanced processors after all configs are set
+        self._init_enhanced_processors()
     
     def download_all_datasets(self, datasets: Optional[List[str]] = None,
                             force_download: bool = False) -> Dict[str, Any]:
@@ -1178,6 +1265,45 @@ class DatasetDownloader:
                     logger.info(f"🗑️ Removed: {file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to remove {file_path}: {e}")
+    
+    def _init_enhanced_processors(self):
+        """Initialize enhanced dataset processors via bridge"""
+        try:
+            from .enhanced_processor_bridge import EnhancedProcessorBridge
+            bridge = EnhancedProcessorBridge(self)
+            
+            # Set enhanced processors
+            self._process_ave_dataset = bridge.process_ave_dataset
+            self._process_v3c1 = bridge.process_v3c1
+            self._process_reddit_editors = bridge.process_reddit_editors
+            self._process_youtube_tutorials = bridge.process_youtube_tutorials
+            self._process_video_effects_code = bridge.process_video_effects_code
+            self._process_kaggle_datasets = bridge.process_kaggle_datasets
+            self._process_professional_editing = bridge.process_professional_editing
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize enhanced processors: {e}")
+            # Set basic fallback processors
+            self._setup_fallback_processors()
+    
+    def _setup_fallback_processors(self):
+        """Setup basic fallback processors"""
+        def basic_fallback(name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+            logger.warning(f"Using basic fallback for {name}")
+            all_samples = [{"sample_id": f"{name}_fallback", "source": name, "fallback": True}]
+            samples_file = output_dir / "samples.json"
+            with open(samples_file, 'w') as f:
+                json.dump(all_samples, f, indent=2)
+            return {"dataset": name, "samples": len(all_samples), "files": len(files), "samples_file": str(samples_file), "fallback": True}
+        
+        # Assign fallback to all enhanced processors
+        self._process_ave_dataset = basic_fallback
+        self._process_v3c1 = basic_fallback
+        self._process_reddit_editors = basic_fallback
+        self._process_youtube_tutorials = basic_fallback
+        self._process_video_effects_code = basic_fallback
+        self._process_kaggle_datasets = basic_fallback
+        self._process_professional_editing = basic_fallback
 
 
 def auto_download_datasets(datasets: Optional[List[str]] = None,
@@ -1215,3 +1341,44 @@ if __name__ == "__main__":
         print(f"📦 Downloaded {len(results)} datasets")
         print(f"📊 Total samples: {sum(r.get('samples', 0) for r in results.values())}")
         print(f"💾 Data location: {args.data_dir}")
+        
+    def _process_howto100m(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+        """Process HowTo100M dataset"""
+        
+        logger.info(f"    🔄 Processing HowTo100M data...")
+        all_samples = []
+        
+        for file_path in files:
+            try:
+                df = pd.read_csv(file_path)
+                
+                for _, row in df.iterrows():
+                    if len(all_samples) >= config["sample_limit"]:
+                        break
+                    
+                    sample = {
+                        "video_id": row.get("video_id", ""),
+                        "text": row.get("text", ""),
+                        "start": row.get("start", 0.0),
+                        "end": row.get("end", 10.0),
+                        "task_type": row.get("task_type", "general"),
+                        "source": "howto100m"
+                    }
+                    all_samples.append(sample)
+                
+                if len(all_samples) >= config["sample_limit"]:
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"    ⚠️ Failed to process {file_path}: {e}")
+        
+        samples_file = output_dir / "samples.json"
+        with open(samples_file, 'w') as f:
+            json.dump(all_samples, f, indent=2)
+        
+        return {
+            "dataset": name,
+            "samples": len(all_samples),
+            "files": len(files),
+            "samples_file": str(samples_file)
+        }
