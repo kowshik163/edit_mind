@@ -98,6 +98,17 @@ class HybridVideoAI(nn.Module):
             num_heads=config['model']['num_attention_heads']
         )
         
+        # Self-coding engine for dynamic effect generation
+        try:
+            from ..generation.self_coding_engine import SelfCodingVideoEditor
+            self.self_coding_engine = SelfCodingVideoEditor(config)
+            self.has_self_coding = True
+            logger.info("✅ Self-coding engine enabled")
+        except ImportError as e:
+            logger.warning(f"Self-coding engine not available: {e}")
+            self.self_coding_engine = None
+            self.has_self_coding = False
+        
         # Video understanding module
         self.video_understanding = VideoUnderstandingModule(
             fusion_dim=config['model']['fusion_dim'],
@@ -153,7 +164,8 @@ class HybridVideoAI(nn.Module):
                 text_input_ids: Optional[torch.Tensor] = None,
                 text_attention_mask: Optional[torch.Tensor] = None,
                 editing_prompt: Optional[str] = None,
-                return_timeline: bool = False) -> Dict[str, torch.Tensor]:
+                return_timeline: bool = False,
+                custom_effects: Optional[Dict] = None) -> Dict[str, torch.Tensor]:
         """
         Forward pass through the hybrid AI system
         
@@ -232,7 +244,8 @@ class HybridVideoAI(nn.Module):
     
     def autonomous_edit(self, video_path: str, prompt: str) -> str:
         """
-        Main autonomous editing pipeline
+        Fully autonomous video editing based on natural language prompt
+        Enhanced with self-coding capabilities for custom effects
         
         Args:
             video_path: Path to input video
@@ -241,26 +254,90 @@ class HybridVideoAI(nn.Module):
         Returns:
             Path to edited video
         """
+        logger.info(f"🎬 Starting autonomous edit: {prompt}")
+        
         # Load and preprocess video
         video_data = self.vision_processor.load_video(video_path)
         audio_data = self.audio_processor.load_audio(video_path)
         
-        # Run inference
+        # Analyze prompt for custom effect requirements
+        custom_effects = self._analyze_prompt_for_custom_effects(prompt)
+        
+        # Generate custom effects if needed using self-coding
+        generated_effects = {}
+        if custom_effects and self.has_self_coding:
+            logger.info(f"🔧 Generating {len(custom_effects)} custom effects...")
+            for effect_desc in custom_effects:
+                try:
+                    effect_func = self.self_coding_engine.create_custom_effect(
+                        effect_desc, 
+                        test_frame=video_data['frames'][0] if len(video_data['frames']) > 0 else None
+                    )
+                    if effect_func:
+                        generated_effects[effect_desc] = effect_func
+                        logger.info(f"✅ Generated effect: {effect_desc}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to generate effect '{effect_desc}': {e}")
+        
+        # Run inference with enhanced editing capabilities
         outputs = self.forward(
             video_frames=video_data['frames'],
             audio_features=audio_data['features'],
             editing_prompt=prompt,
-            return_timeline=True
+            return_timeline=True,
+            custom_effects=generated_effects
         )
         
-        # Generate final video
+        # Generate final video with custom effects applied
         output_path = self.timeline_generator.render_video(
             timeline=outputs['timeline'],
             video_data=video_data,
-            audio_data=audio_data
+            audio_data=audio_data,
+            custom_effects=generated_effects
         )
         
+        logger.info(f"🎉 Autonomous edit complete: {output_path}")
         return output_path
+    
+    def _analyze_prompt_for_custom_effects(self, prompt: str) -> List[str]:
+        """Analyze editing prompt to identify requests for custom effects"""
+        
+        custom_effect_indicators = [
+            "create a", "generate a", "add a custom", "make a unique",
+            "apply a special", "create custom", "generate unique",
+            "unusual effect", "special transition", "unique filter"
+        ]
+        
+        custom_effects = []
+        prompt_lower = prompt.lower()
+        
+        # Look for custom effect requests
+        for indicator in custom_effect_indicators:
+            if indicator in prompt_lower:
+                # Extract the effect description
+                start_idx = prompt_lower.find(indicator)
+                # Find the rest of the sentence
+                end_idx = prompt_lower.find('.', start_idx)
+                if end_idx == -1:
+                    end_idx = len(prompt)
+                
+                effect_desc = prompt[start_idx:end_idx].strip()
+                if effect_desc and len(effect_desc) > 10:  # Meaningful description
+                    custom_effects.append(effect_desc)
+        
+        # Also look for specific effect descriptions
+        effect_keywords = [
+            "glitch", "distortion", "vintage", "cyberpunk", "neon",
+            "particle", "fractal", "kaleidoscope", "mirror", "ripple",
+            "shatter", "explode", "melt", "morph", "warp"
+        ]
+        
+        for keyword in effect_keywords:
+            if keyword in prompt_lower and f"{keyword} effect" not in [e.lower() for e in custom_effects]:
+                custom_effects.append(f"{keyword} effect")
+        
+        logger.info(f"Identified {len(custom_effects)} custom effects: {custom_effects}")
+        return custom_effects
         
     def set_training_phase(self, phase: str):
         """Set current training phase for different optimization strategies"""

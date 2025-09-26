@@ -32,17 +32,29 @@ deepspeed>=0.9.0
 wandb>=0.15.0
 tensorboard>=2.13.0
 omegaconf>=2.3.0
+trl>=0.7.0  # Transformer Reinforcement Learning for robust RLHF
 
 # HTTP and data downloading
 requests>=2.31.0
 tqdm>=4.65.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
+youtube-dl>=2021.12.17  # For YouTube video downloading
+yt-dlp>=2023.9.24  # Modern YouTube downloader
+gdown>=4.7.0  # Google Drive downloader
 
 # Optional advanced features
 peft>=0.4.0  # Parameter-efficient fine-tuning
 bitsandbytes>=0.39.0  # Quantization support
 flash-attn>=2.0.0  # Flash attention (if supported)
+
+# Self-coding capabilities
+codellama  # CodeLLaMA for dynamic effect generation
+sentencepiece>=0.1.99  # Required for CodeLLaMA tokenizer
+
+# Enhanced dataset support
+kaggle>=1.5.16  # Kaggle API for dataset downloads
+praw>=7.7.0  # Python Reddit API wrapper
 
 # Development and testing
 pytest>=7.4.0

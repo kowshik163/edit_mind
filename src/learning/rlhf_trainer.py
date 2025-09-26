@@ -1,5 +1,5 @@
 """
-RLHF Trainer - Reinforcement Learning from Human Feedback implementation
+RLHF Trainer - Reinforcement Learning from Human Feedback implementation using TRL
 """
 
 import torch
@@ -16,8 +16,17 @@ from omegaconf import DictConfig
 from dataclasses import dataclass
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import AdamW
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_linear_schedule_with_warmup, AutoTokenizer, AutoModel
 from pathlib import Path
+
+# TRL imports for robust RLHF
+try:
+    from trl import PPOTrainer, PPOConfig, AutoModelForCausalLMWithValueHead
+    from trl.core import LengthSampler
+    HAS_TRL = True
+except ImportError:
+    HAS_TRL = False
+    logging.warning("TRL not available - falling back to basic implementation")
 
 # Try to import video/audio processing libraries
 try:
@@ -143,10 +152,31 @@ class RewardModel(nn.Module):
         }
 
 
+# Import enhanced implementation
+try:
+    from .enhanced_rlhf_trainer import EnhancedRLHFTrainer, VideoEditingRewardModel
+    logger.info("Using enhanced RLHF trainer with TRL support")
+except ImportError:
+    logger.warning("Enhanced RLHF trainer not available, using fallback")
+    EnhancedRLHFTrainer = None
+
+
 class RLHFTrainer:
     """Reinforcement Learning from Human Feedback trainer for video editing"""
     
     def __init__(self, config: DictConfig, model: nn.Module):
+        # Try to use enhanced trainer first
+        if EnhancedRLHFTrainer is not None and HAS_TRL:
+            try:
+                self._enhanced_trainer = EnhancedRLHFTrainer(config, model)
+                self._use_enhanced = True
+                logger.info("✅ Using enhanced RLHF trainer with TRL")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to initialize enhanced trainer: {e}")
+        
+        # Fallback to basic implementation
+        self._use_enhanced = False
         self.config = self._setup_default_config(config)
         self.model = model  # The main video editing model
         self.device = torch.device(self.config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
@@ -198,6 +228,12 @@ class RLHFTrainer:
         logger.info(f"  Policy LR: {self.learning_rate}")
         logger.info(f"  Reward LR: {self.reward_lr}")
         logger.info(f"  PPO Epochs: {self.ppo_epochs}")
+    
+    def __getattr__(self, name):
+        """Delegate method calls to enhanced trainer if available"""
+        if hasattr(self, '_use_enhanced') and self._use_enhanced and hasattr(self, '_enhanced_trainer'):
+            return getattr(self._enhanced_trainer, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     
     def _setup_default_config(self, config: DictConfig) -> DictConfig:
         """Setup default configuration values for RLHF training"""
