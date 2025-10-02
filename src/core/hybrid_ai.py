@@ -335,67 +335,267 @@ class HybridVideoAI(nn.Module):
     
     def _analyze_prompt_for_custom_effects(self, prompt: str) -> List[str]:
         """
-        Advanced LLM-powered analysis of editing prompt to identify and extract custom effect requirements.
-        Uses the language model to understand nuanced effect descriptions and generate structured editing plans.
+        Sophisticated LLM-powered analysis of editing prompt using advanced reasoning capabilities.
+        Employs multi-stage analysis with context understanding and creative interpretation.
         """
         
-        # Enhanced prompt analysis using the language model
-        analysis_prompt = f"""
-        Analyze the following video editing request and extract any custom effects, transitions, or special visual treatments that need to be created:
+        # Multi-stage sophisticated prompt for comprehensive analysis
+        analysis_system_prompt = """You are an expert video editor and visual effects artist with deep knowledge of:
+- Modern video editing techniques and workflows
+- Visual effects creation and compositing
+- Motion graphics and animation
+- Color theory and cinematography  
+- Creative storytelling through visual media
 
-        USER REQUEST: "{prompt}"
+Your task is to analyze video editing requests and identify opportunities for custom effects, creative enhancements, and technical implementations."""
 
-        Instructions:
-        1. Identify any requests for custom visual effects (glitch, distortion, particle systems, etc.)
-        2. Look for unique transitions or motion graphics requests  
-        3. Detect style requests (cyberpunk, vintage, neon, etc.)
-        4. Extract any specific technical requirements (color grading, compositing, etc.)
-        5. Return a structured list of effect descriptions
+        user_analysis_prompt = f"""Analyze this video editing request with expert-level understanding:
 
-        Response format:
-        CUSTOM_EFFECTS: [effect1, effect2, effect3]
-        STYLE_REQUESTS: [style1, style2]
-        TECHNICAL_REQUIREMENTS: [req1, req2]
+"{prompt}"
 
-        Analysis:
-        """
+Provide a comprehensive analysis covering:
+
+1. EXPLICIT EFFECTS: Any directly mentioned effects, filters, or treatments
+2. IMPLIED CREATIVE OPPORTUNITIES: Subtle suggestions for enhancements based on context
+3. TECHNICAL REQUIREMENTS: Technical aspects needed (color grading, compositing, etc.)
+4. STYLE INTERPRETATION: Aesthetic direction and mood implications
+5. ADVANCED TECHNIQUES: Professional techniques that would elevate the result
+
+Format your response as a structured analysis with clear categories and actionable items.
+
+Focus on identifying both obvious and nuanced requirements that would create a professional, engaging result."""
         
         try:
-            # Tokenize the analysis prompt
-            inputs = self.tokenizer.encode(analysis_prompt, return_tensors='pt', truncation=True, max_length=1024)
-            if torch.cuda.is_available():
-                inputs = inputs.cuda()
+            # Use sophisticated conversation-style inference
+            messages = [
+                {"role": "system", "content": analysis_system_prompt},
+                {"role": "user", "content": user_analysis_prompt}
+            ]
             
-            # Generate LLM analysis with controlled generation
+            # Create a more sophisticated prompt for analysis
+            formatted_prompt = self._format_conversation_for_inference(messages)
+            
+            # Advanced tokenization with proper attention
+            inputs = self.tokenizer(
+                formatted_prompt,
+                return_tensors='pt',
+                max_length=2048,  # Larger context for sophisticated analysis
+                truncation=True,
+                padding=True
+            )
+            
+            # Move to device if available
+            if torch.cuda.is_available() and self.language_model.device != torch.device('cpu'):
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            
+            # Sophisticated generation with multiple sampling strategies
             with torch.no_grad():
                 if hasattr(self.language_model, 'generate'):
-                    outputs = self.language_model.generate(
-                        inputs,
-                        max_new_tokens=300,
-                        temperature=0.3,  # Low temperature for more focused analysis
+                    
+                    # Strategy 1: High-quality reasoning (low temperature)
+                    reasoning_outputs = self.language_model.generate(
+                        **inputs,
+                        max_new_tokens=512,
+                        temperature=0.2,  # Low temperature for analytical reasoning
+                        top_p=0.9,
                         do_sample=True,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id
+                        num_beams=1,
+                        pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        repetition_penalty=1.1,
+                        no_repeat_ngram_size=3
                     )
                     
-                    # Decode the response
-                    response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                    reasoning_response = self.tokenizer.decode(reasoning_outputs[0], skip_special_tokens=True)
+                    reasoning_effects = self._extract_effects_from_advanced_analysis(reasoning_response, "reasoning")
                     
-                    # Extract custom effects from structured response
-                    custom_effects = self._parse_llm_analysis(response)
+                    # Strategy 2: Creative ideation (higher temperature)
+                    creative_outputs = self.language_model.generate(
+                        **inputs,
+                        max_new_tokens=384,
+                        temperature=0.7,  # Higher temperature for creative suggestions
+                        top_p=0.95,
+                        do_sample=True,
+                        num_beams=1,
+                        pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        repetition_penalty=1.15
+                    )
                     
-                    if custom_effects:
-                        logger.info(f"🧠 LLM identified {len(custom_effects)} custom effects: {custom_effects}")
-                        return custom_effects
+                    creative_response = self.tokenizer.decode(creative_outputs[0], skip_special_tokens=True)
+                    creative_effects = self._extract_effects_from_advanced_analysis(creative_response, "creative")
+                    
+                    # Combine and deduplicate effects
+                    all_effects = reasoning_effects + creative_effects
+                    unique_effects = self._deduplicate_and_rank_effects(all_effects, prompt)
+                    
+                    if unique_effects:
+                        logger.info(f"🧠 Advanced LLM analysis identified {len(unique_effects)} effects: {unique_effects[:3]}...")
+                        return unique_effects
                         
                 else:
-                    logger.warning("Language model doesn't support generation, falling back to heuristic analysis")
+                    logger.warning("Language model generation not available")
                     
         except Exception as e:
-            logger.warning(f"LLM analysis failed: {e}, using fallback keyword analysis")
+            logger.warning(f"Advanced LLM analysis failed: {e}")
         
-        # Fallback to enhanced keyword-based analysis if LLM fails
-        return self._fallback_effect_analysis(prompt)
+        # Enhanced fallback with context understanding
+        return self._sophisticated_fallback_analysis(prompt)
+    
+    def _format_conversation_for_inference(self, messages: List[Dict[str, str]]) -> str:
+        """Format conversation messages for model inference"""
+        formatted = ""
+        for message in messages:
+            role = message["role"]
+            content = message["content"]
+            if role == "system":
+                formatted += f"System: {content}\n\n"
+            elif role == "user":
+                formatted += f"User: {content}\n\nAssistant: "
+        return formatted
+    
+    def _extract_effects_from_advanced_analysis(self, response: str, analysis_type: str) -> List[str]:
+        """Extract effects from sophisticated LLM analysis response"""
+        effects = []
+        
+        try:
+            # Remove the original prompt from response
+            if "Assistant:" in response:
+                analysis = response.split("Assistant:")[-1].strip()
+            else:
+                analysis = response
+            
+            # Look for structured sections
+            sections = {
+                'explicit': ['explicit effects', 'direct requests', 'mentioned effects', '1.'],
+                'implied': ['implied', 'creative opportunities', 'suggestions', '2.'], 
+                'technical': ['technical', 'requirements', 'technical aspects', '3.'],
+                'style': ['style', 'aesthetic', 'mood', '4.'],
+                'advanced': ['advanced', 'professional', 'techniques', '5.']
+            }
+            
+            analysis_lower = analysis.lower()
+            
+            # Extract from structured sections
+            for section_type, keywords in sections.items():
+                for keyword in keywords:
+                    if keyword in analysis_lower:
+                        # Find the section content
+                        start_idx = analysis_lower.find(keyword)
+                        
+                        # Find next section or end
+                        next_sections = []
+                        for other_type, other_keywords in sections.items():
+                            if other_type != section_type:
+                                for other_keyword in other_keywords:
+                                    next_idx = analysis_lower.find(other_keyword, start_idx + len(keyword))
+                                    if next_idx > start_idx:
+                                        next_sections.append(next_idx)
+                        
+                        end_idx = min(next_sections) if next_sections else len(analysis)
+                        section_content = analysis[start_idx:end_idx]
+                        
+                        # Extract effects from section
+                        section_effects = self._parse_section_for_effects(section_content, section_type)
+                        effects.extend(section_effects)
+                        break  # Only process first match per section
+            
+            # If no structured sections found, use general parsing
+            if not effects:
+                effects = self._parse_general_effects(analysis)
+            
+            # Add analysis type prefix for context
+            effects = [f"[{analysis_type}] {effect}" for effect in effects if effect]
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract effects from {analysis_type} analysis: {e}")
+        
+        return effects
+    
+    def _parse_section_for_effects(self, section_content: str, section_type: str) -> List[str]:
+        """Parse a specific section for effect descriptions"""
+        effects = []
+        
+        # Look for bullet points, numbered lists, and comma-separated items
+        import re
+        
+        # Bullet points and numbered lists
+        list_items = re.findall(r'[-*•]\s*([^\n]+)', section_content)
+        list_items.extend(re.findall(r'\d+\.\s*([^\n]+)', section_content))
+        
+        # Quoted items
+        quoted_items = re.findall(r'"([^"]+)"', section_content)
+        quoted_items.extend(re.findall(r"'([^']+)'", section_content))
+        
+        # Technical terms and effect names
+        if section_type in ['technical', 'advanced']:
+            tech_patterns = re.findall(r'\b(color\s+\w+|motion\s+\w+|\w+\s+effect|\w+\s+filter|\w+\s+transition)\b', section_content.lower())
+            effects.extend(tech_patterns)
+        
+        # Combine all found items
+        all_items = list_items + quoted_items
+        
+        # Clean and filter
+        for item in all_items:
+            item = item.strip().strip('.,!?')
+            if len(item) > 5 and len(item) < 100:  # Reasonable length
+                effects.append(item)
+        
+        return effects[:5]  # Limit per section
+    
+    def _parse_general_effects(self, analysis: str) -> List[str]:
+        """General parsing for effect descriptions when no structure is found"""
+        effects = []
+        
+        # Look for effect-related sentences
+        import re
+        
+        effect_sentences = re.findall(r'[^.!?]*(?:effect|filter|transition|style|treatment|technique)[^.!?]*[.!?]', analysis.lower())
+        
+        for sentence in effect_sentences:
+            # Extract the key effect description
+            sentence = sentence.strip()
+            if len(sentence) > 10 and len(sentence) < 150:
+                effects.append(sentence)
+        
+        return effects[:3]  # Limit general parsing
+    
+    def _deduplicate_and_rank_effects(self, effects: List[str], original_prompt: str) -> List[str]:
+        """Remove duplicates and rank effects by relevance"""
+        if not effects:
+            return []
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_effects = []
+        
+        for effect in effects:
+            # Clean the effect string
+            cleaned = effect.lower().strip()
+            # Remove analysis type prefix for comparison
+            if '] ' in cleaned:
+                cleaned = cleaned.split('] ', 1)[-1]
+            
+            if cleaned not in seen and len(cleaned) > 3:
+                seen.add(cleaned)
+                unique_effects.append(effect)
+        
+        # Rank by relevance to original prompt
+        prompt_lower = original_prompt.lower()
+        ranked_effects = []
+        
+        # High relevance: directly mentioned in prompt
+        for effect in unique_effects:
+            effect_words = effect.lower().split()
+            if any(word in prompt_lower for word in effect_words if len(word) > 3):
+                ranked_effects.append(effect)
+        
+        # Medium relevance: related concepts
+        for effect in unique_effects:
+            if effect not in ranked_effects:
+                ranked_effects.append(effect)
+        
+        return ranked_effects[:8]  # Return top 8 effects
     
     def _parse_llm_analysis(self, response: str) -> List[str]:
         """Parse structured LLM response to extract custom effects"""
@@ -428,52 +628,158 @@ class HybridVideoAI(nn.Module):
         
         return custom_effects
     
-    def _fallback_effect_analysis(self, prompt: str) -> List[str]:
-        """Enhanced fallback analysis using improved keyword detection"""
-        
-        custom_effect_indicators = [
-            "create a", "generate a", "add a custom", "make a unique",
-            "apply a special", "create custom", "generate unique",
-            "unusual effect", "special transition", "unique filter",
-            "dynamic effect", "animated", "procedural", "generative"
-        ]
+    def _sophisticated_fallback_analysis(self, prompt: str) -> List[str]:
+        """
+        Sophisticated fallback analysis using advanced natural language processing and context understanding.
+        Uses multiple analytical approaches when LLM generation is not available.
+        """
         
         custom_effects = []
         prompt_lower = prompt.lower()
         
-        # Advanced effect keywords with categories
-        effect_categories = {
-            'glitch': ['glitch', 'corruption', 'digital noise', 'pixelation', 'datamosh'],
-            'distortion': ['distortion', 'warp', 'ripple', 'wave', 'bend', 'twist'],
-            'particle': ['particle', 'sparks', 'dust', 'smoke', 'fire', 'energy'],
-            'style': ['cyberpunk', 'vintage', 'retro', 'neon', '80s', 'synthwave', 'vaporwave'],
-            'motion': ['zoom', 'pan', 'tilt', 'rotate', 'shake', 'stabilize'],
-            'color': ['color grade', 'tint', 'saturation', 'contrast', 'brightness'],
-            'composite': ['green screen', 'chroma key', 'masking', 'rotoscope']
+        # Advanced contextual indicators for custom effect requests
+        custom_effect_patterns = {
+            'creation_requests': [
+                r'create (?:a |an )?(\w+(?:\s+\w+){0,3})\s+(?:effect|filter|style)',
+                r'generate (?:a |an )?(\w+(?:\s+\w+){0,3})\s+(?:effect|transition)',
+                r'add (?:a |an )?(?:custom|unique|special)\s+(\w+(?:\s+\w+){0,2})',
+                r'make (?:it |this )?(?:look|appear)\s+(\w+(?:\s+\w+){0,2})',
+                r'apply (?:a |an )?(\w+(?:\s+\w+){0,2})\s+(?:treatment|style|look)'
+            ],
+            'style_descriptors': [
+                r'(?:with|using|in)\s+(?:a |an )?(\w+(?:\s+\w+){0,2})\s+style',
+                r'(?:make|give|add)\s+(?:it |this )?(?:a |an )?(\w+(?:\s+\w+){0,2})\s+(?:feel|vibe|aesthetic)',
+                r'(?:cinematic|artistic|stylized|creative)\s+(\w+(?:\s+\w+){0,2})'
+            ],
+            'technical_requests': [
+                r'(?:color|colour)\s+(grade|grading|correct|correction)\s+(?:to|for|with)\s+(\w+(?:\s+\w+){0,2})',
+                r'(?:composite|blend|layer|mask)\s+(?:with|using|for)\s+(\w+(?:\s+\w+){0,2})',
+                r'(?:motion|camera)\s+(track|tracking|stabiliz\w+)\s+(\w+(?:\s+\w+){0,2})'
+            ]
         }
         
-        # Look for custom effect requests with context
-        for indicator in custom_effect_indicators:
-            if indicator in prompt_lower:
-                start_idx = prompt_lower.find(indicator)
-                end_idx = prompt_lower.find('.', start_idx)
-                if end_idx == -1:
-                    end_idx = len(prompt)
+        # Extract effects using pattern matching
+        import re
+        
+        for category, patterns in custom_effect_patterns.items():
+            for pattern in patterns:
+                matches = re.findall(pattern, prompt_lower)
+                for match in matches:
+                    if isinstance(match, tuple):
+                        effect_desc = ' '.join(match).strip()
+                    else:
+                        effect_desc = match.strip()
+                    
+                    if effect_desc and len(effect_desc) > 2:
+                        category_prefix = category.replace('_', ' ').title()
+                        custom_effects.append(f"{category_prefix}: {effect_desc}")
+        
+        # Advanced semantic analysis using professional editing vocabulary
+        professional_techniques = {
+            'cinematography': {
+                'keywords': ['cinematic', 'film', 'movie', 'shot', 'frame', 'composition'],
+                'effects': ['cinematic color grading', 'film grain', 'letterboxing', 'depth of field']
+            },
+            'motion_graphics': {
+                'keywords': ['motion', 'graphics', 'animation', 'animated', 'dynamic', 'kinetic'],
+                'effects': ['animated text', 'motion tracking', 'kinetic typography', 'logo animation']
+            },
+            'visual_effects': {
+                'keywords': ['vfx', 'effects', 'magical', 'surreal', 'fantasy', 'sci-fi'],
+                'effects': ['particle effects', 'light rays', 'energy beams', 'magical glow']
+            },
+            'audio_visual': {
+                'keywords': ['music', 'beat', 'rhythm', 'sync', 'audio'],
+                'effects': ['audio visualization', 'rhythm-based cuts', 'music sync effects']
+            },
+            'stylistic': {
+                'keywords': ['vintage', 'retro', 'modern', 'futuristic', 'artistic', 'abstract'],
+                'effects': ['vintage film look', 'retro color scheme', 'modern transitions', 'artistic filters']
+            }
+        }
+        
+        # Analyze prompt for professional technique indicators
+        for technique_category, technique_data in professional_techniques.items():
+            keyword_matches = sum(1 for keyword in technique_data['keywords'] if keyword in prompt_lower)
+            
+            if keyword_matches > 0:
+                # Select most relevant effects based on keyword density
+                relevance_score = keyword_matches / len(technique_data['keywords'])
+                num_effects = min(len(technique_data['effects']), max(1, int(relevance_score * 3)))
                 
-                effect_desc = prompt[start_idx:end_idx].strip()
-                if effect_desc and len(effect_desc) > 10:
-                    custom_effects.append(effect_desc)
+                selected_effects = technique_data['effects'][:num_effects]
+                for effect in selected_effects:
+                    custom_effects.append(f"Professional {technique_category.replace('_', ' ').title()}: {effect}")
         
-        # Categorized effect detection
-        for category, keywords in effect_categories.items():
-            for keyword in keywords:
-                if keyword in prompt_lower:
-                    effect_name = f"{keyword} effect"
-                    if effect_name not in [e.lower() for e in custom_effects]:
-                        custom_effects.append(effect_name)
+        # Context-aware intensity and complexity analysis
+        intensity_indicators = {
+            'subtle': ['subtle', 'light', 'gentle', 'soft', 'mild'],
+            'moderate': ['noticeable', 'clear', 'visible', 'apparent'],
+            'dramatic': ['dramatic', 'bold', 'strong', 'intense', 'heavy', 'extreme']
+        }
         
-        logger.info(f"📝 Keyword analysis identified {len(custom_effects)} effects: {custom_effects}")
-        return custom_effects
+        detected_intensity = 'moderate'  # default
+        for intensity, keywords in intensity_indicators.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                detected_intensity = intensity
+                break
+        
+        # Enhance effects with intensity information
+        if custom_effects:
+            intensity_enhanced_effects = []
+            for effect in custom_effects:
+                if detected_intensity != 'moderate':
+                    enhanced_effect = f"{effect} ({detected_intensity} intensity)"
+                else:
+                    enhanced_effect = effect
+                intensity_enhanced_effects.append(enhanced_effect)
+            custom_effects = intensity_enhanced_effects
+        
+        # Advanced content type detection for contextual effects
+        content_type_indicators = {
+            'social_media': ['instagram', 'tiktok', 'youtube', 'social', 'viral', 'trending'],
+            'corporate': ['business', 'corporate', 'professional', 'presentation'],
+            'creative': ['art', 'artistic', 'creative', 'experimental', 'unique'],
+            'entertainment': ['fun', 'entertaining', 'playful', 'exciting', 'dynamic']
+        }
+        
+        detected_content_type = None
+        for content_type, keywords in content_type_indicators.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                detected_content_type = content_type
+                break
+        
+        # Add content-type specific effect suggestions
+        if detected_content_type:
+            content_specific_effects = {
+                'social_media': ['trendy transitions', 'social media optimized colors', 'engagement-focused cuts'],
+                'corporate': ['professional transitions', 'corporate branding effects', 'clean typography'],
+                'creative': ['experimental effects', 'artistic filters', 'creative compositions'],
+                'entertainment': ['dynamic transitions', 'fun effects', 'energetic pacing']
+            }
+            
+            if detected_content_type in content_specific_effects:
+                for effect in content_specific_effects[detected_content_type]:
+                    custom_effects.append(f"Content-Type Enhancement: {effect}")
+        
+        # Remove duplicates and clean up
+        unique_effects = []
+        seen_effects = set()
+        
+        for effect in custom_effects:
+            effect_clean = effect.lower().strip()
+            if effect_clean not in seen_effects and len(effect) > 5:
+                seen_effects.add(effect_clean)
+                unique_effects.append(effect)
+        
+        # Limit to most relevant effects
+        unique_effects = unique_effects[:10]
+        
+        logger.info(f"📝 Sophisticated fallback analysis identified {len(unique_effects)} effects")
+        for i, effect in enumerate(unique_effects[:3], 1):
+            logger.info(f"  {i}. {effect}")
+        
+        return unique_effects
         
     def set_training_phase(self, phase: str):
         """Set current training phase for different optimization strategies"""

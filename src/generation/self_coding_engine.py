@@ -408,94 +408,742 @@ class VideoEffectCodeGenerator:
     def generate_effect_code(self, effect_description: str, 
                            reference_effects: List[Dict] = None) -> Optional[str]:
         """
-        Enhanced video effect code generation using fine-tuned CodeLLaMA.
-        Generates sophisticated video effects from natural language descriptions.
+        Production-ready video effect code generation using fine-tuned CodeLLaMA with advanced strategies.
+        Implements multiple generation approaches, sophisticated validation, and robust fallback systems.
         """
         
+        # Initialize model if needed
         if self.model is None:
-            logger.warning("CodeLLaMA not available, attempting to load model...")
-            # Try to initialize model on-demand
+            logger.info("🤖 CodeLLaMA not loaded, attempting initialization...")
             self._initialize_model()
             
             if self.model is None:
-                logger.error("CodeLLaMA initialization failed, using advanced template fallback")
-                return self._generate_advanced_template_code(effect_description)
+                logger.warning("CodeLLaMA initialization failed, using sophisticated template system")
+                return self._generate_production_ready_template_code(effect_description, reference_effects)
         
         try:
-            # Enhanced prompt engineering for better code generation
-            prompt = self._create_enhanced_code_generation_prompt(effect_description, reference_effects)
+            # Multi-stage generation process for optimal results
+            logger.info(f"🎬 Generating video effect code for: '{effect_description}'")
             
-            # Advanced tokenization with better handling
-            inputs = self.tokenizer(
-                prompt, 
-                return_tensors="pt", 
-                max_length=4096,  # Increased context window
-                truncation=True,
-                padding=True
+            # Stage 1: Comprehensive prompt engineering
+            generation_context = self._analyze_effect_requirements(effect_description)
+            sophisticated_prompt = self._create_production_grade_prompt(
+                effect_description, reference_effects, generation_context
             )
             
-            # Move to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            # Stage 2: Advanced tokenization with context preservation
+            inputs = self.tokenizer(
+                sophisticated_prompt,
+                return_tensors="pt",
+                max_length=4096,  # Large context for complex effects
+                truncation=True,
+                padding=True,
+                add_special_tokens=True
+            )
             
-            # Enhanced generation with multiple strategies
+            # Move to appropriate device
+            device = next(self.model.parameters()).device if self.model else 'cpu'
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            # Stage 3: Multi-strategy code generation
             generated_codes = []
             
-            # Strategy 1: High creativity for complex effects
-            if any(keyword in effect_description.lower() for keyword in 
-                   ['complex', 'advanced', 'creative', 'artistic', 'unique']):
-                
-                with torch.no_grad():
-                    outputs = self.model.generate(
-                        **inputs,
-                        max_new_tokens=1024,
-                        temperature=0.9,  # Higher creativity
-                        top_p=0.95,
-                        do_sample=True,
-                        num_return_sequences=2,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                        repetition_penalty=1.1
-                    )
-                
-                for output in outputs:
-                    generated_text = self.tokenizer.decode(output, skip_special_tokens=True)
-                    code = self._extract_and_validate_code(generated_text, prompt)
-                    if code:
-                        generated_codes.append(code)
+            # Strategy A: High-precision generation for technical effects
+            if generation_context['technical_complexity'] == 'high':
+                precision_codes = self._generate_precision_code(inputs, effect_description)
+                generated_codes.extend(precision_codes)
             
-            # Strategy 2: Focused generation for standard effects
-            else:
-                with torch.no_grad():
-                    outputs = self.model.generate(
-                        **inputs,
-                        max_new_tokens=768,
-                        temperature=0.4,  # More focused
-                        top_p=0.9,
-                        do_sample=True,
-                        num_return_sequences=1,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                        repetition_penalty=1.05
-                    )
-                
-                generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                code = self._extract_and_validate_code(generated_text, prompt)
-                if code:
-                    generated_codes.append(code)
+            # Strategy B: Creative generation for artistic effects  
+            if generation_context['creative_complexity'] == 'high':
+                creative_codes = self._generate_creative_code(inputs, effect_description)
+                generated_codes.extend(creative_codes)
             
-            # Select best generated code
+            # Strategy C: Balanced generation for general effects
+            if not generated_codes or generation_context['complexity_level'] == 'moderate':
+                balanced_codes = self._generate_balanced_code(inputs, effect_description)
+                generated_codes.extend(balanced_codes)
+            
+            # Stage 4: Advanced code validation and selection
             if generated_codes:
-                best_code = self._select_best_code(generated_codes, effect_description)
-                logger.info(f"✅ Successfully generated effect code for: {effect_description}")
-                return best_code
-            else:
-                logger.warning("Generated code validation failed, using advanced fallback")
-                return self._generate_advanced_template_code(effect_description)
+                validated_codes = []
+                for code in generated_codes:
+                    if self._comprehensive_code_validation(code, effect_description):
+                        validated_codes.append(code)
+                
+                if validated_codes:
+                    best_code = self._intelligent_code_selection(
+                        validated_codes, effect_description, generation_context
+                    )
+                    
+                    # Final optimization and cleanup
+                    optimized_code = self._optimize_and_finalize_code(best_code, effect_description)
+                    
+                    logger.info(f"✅ Successfully generated production-ready effect code")
+                    logger.info(f"   Code length: {len(optimized_code)} characters")
+                    logger.info(f"   Complexity: {generation_context['complexity_level']}")
+                    
+                    return optimized_code
+            
+            # Stage 5: Fallback to advanced template system
+            logger.warning("Code generation validation failed, using advanced template system")
+            return self._generate_production_ready_template_code(effect_description, reference_effects)
                 
         except Exception as e:
-            logger.error(f"Enhanced code generation failed: {e}")
-            return self._generate_advanced_template_code(effect_description)
+            logger.error(f"Code generation pipeline failed: {e}")
+            return self._generate_production_ready_template_code(effect_description, reference_effects)
     
+    def _analyze_effect_requirements(self, effect_description: str) -> Dict[str, Any]:
+        """Analyze effect requirements for optimal generation strategy"""
+        
+        context = {
+            'complexity_level': 'moderate',
+            'technical_complexity': 'moderate', 
+            'creative_complexity': 'moderate',
+            'performance_requirements': 'standard',
+            'library_preferences': [],
+            'effect_category': 'general'
+        }
+        
+        desc_lower = effect_description.lower()
+        
+        # Analyze technical complexity
+        high_tech_indicators = ['algorithm', 'mathematical', 'transformation', 'matrix', 'computation']
+        tech_score = sum(1 for indicator in high_tech_indicators if indicator in desc_lower)
+        
+        if tech_score >= 2:
+            context['technical_complexity'] = 'high'
+        elif tech_score == 1:
+            context['technical_complexity'] = 'moderate'
+        else:
+            context['technical_complexity'] = 'low'
+        
+        # Analyze creative complexity
+        creative_indicators = ['artistic', 'creative', 'unique', 'innovative', 'stylized', 'abstract']
+        creative_score = sum(1 for indicator in creative_indicators if indicator in desc_lower)
+        
+        if creative_score >= 2:
+            context['creative_complexity'] = 'high'
+        elif creative_score == 1:
+            context['creative_complexity'] = 'moderate'
+        else:
+            context['creative_complexity'] = 'low'
+        
+        # Overall complexity
+        total_complexity = tech_score + creative_score
+        if total_complexity >= 3:
+            context['complexity_level'] = 'high'
+        elif total_complexity >= 1:
+            context['complexity_level'] = 'moderate'
+        else:
+            context['complexity_level'] = 'low'
+        
+        # Performance analysis
+        realtime_indicators = ['real-time', 'fast', 'quick', 'instant', 'live']
+        if any(indicator in desc_lower for indicator in realtime_indicators):
+            context['performance_requirements'] = 'high_speed'
+        elif any(indicator in ['complex', 'detailed', 'high-quality'] for indicator in desc_lower.split()):
+            context['performance_requirements'] = 'high_quality'
+        
+        # Library preferences
+        if any(term in desc_lower for term in ['opencv', 'cv2', 'computer vision']):
+            context['library_preferences'].append('opencv')
+        if any(term in desc_lower for term in ['numpy', 'numerical', 'mathematical']):
+            context['library_preferences'].append('numpy')
+        if any(term in desc_lower for term in ['pillow', 'pil', 'image']):
+            context['library_preferences'].append('pillow')
+        
+        # Effect categorization
+        categories = {
+            'glitch': ['glitch', 'corruption', 'digital', 'noise'],
+            'color': ['color', 'hue', 'saturation', 'brightness', 'contrast'],
+            'motion': ['motion', 'movement', 'tracking', 'stabilization'],
+            'particle': ['particle', 'spark', 'dust', 'fire', 'smoke'],
+            'distortion': ['distortion', 'warp', 'ripple', 'wave'],
+            'composite': ['composite', 'blend', 'mask', 'overlay']
+        }
+        
+        for category, keywords in categories.items():
+            if any(keyword in desc_lower for keyword in keywords):
+                context['effect_category'] = category
+                break
+        
+        return context
+    
+    def _generate_precision_code(self, inputs: Dict, description: str) -> List[str]:
+        """Generate high-precision code for technical effects"""
+        codes = []
+        
+        try:
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=1024,
+                    temperature=0.1,  # Very low temperature for precision
+                    top_p=0.8,
+                    do_sample=True,
+                    num_return_sequences=2,
+                    pad_token_id=self.tokenizer.eos_token_id or self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.05,
+                    no_repeat_ngram_size=3
+                )
+            
+            for output in outputs:
+                generated_text = self.tokenizer.decode(output, skip_special_tokens=True)
+                code = self._extract_and_validate_code(generated_text, inputs)
+                if code:
+                    codes.append(code)
+                    
+        except Exception as e:
+            logger.warning(f"Precision code generation failed: {e}")
+        
+        return codes
+    
+    def _generate_creative_code(self, inputs: Dict, description: str) -> List[str]:
+        """Generate creative code for artistic effects"""
+        codes = []
+        
+        try:
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=896,
+                    temperature=0.8,  # Higher temperature for creativity
+                    top_p=0.95,
+                    top_k=50,
+                    do_sample=True,
+                    num_return_sequences=2,
+                    pad_token_id=self.tokenizer.eos_token_id or self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.15
+                )
+            
+            for output in outputs:
+                generated_text = self.tokenizer.decode(output, skip_special_tokens=True)
+                code = self._extract_and_validate_code(generated_text, inputs)
+                if code:
+                    codes.append(code)
+                    
+        except Exception as e:
+            logger.warning(f"Creative code generation failed: {e}")
+        
+        return codes
+    
+    def _generate_balanced_code(self, inputs: Dict, description: str) -> List[str]:
+        """Generate balanced code for general effects"""
+        codes = []
+        
+        try:
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=768,
+                    temperature=0.4,  # Balanced temperature
+                    top_p=0.9,
+                    do_sample=True,
+                    num_return_sequences=1,
+                    pad_token_id=self.tokenizer.eos_token_id or self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.1
+                )
+            
+            generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            code = self._extract_and_validate_code(generated_text, inputs)
+            if code:
+                codes.append(code)
+                    
+        except Exception as e:
+            logger.warning(f"Balanced code generation failed: {e}")
+        
+        return codes
+    
+    def _comprehensive_code_validation(self, code: str, description: str) -> bool:
+        """Comprehensive validation of generated code"""
+        
+        try:
+            # Basic syntax validation
+            ast.parse(code)
+            
+            # Function definition check
+            if not any(line.strip().startswith('def ') for line in code.split('\n')):
+                return False
+            
+            # Security validation
+            forbidden_patterns = [
+                'exec', 'eval', '__import__', 'open(', 'file(',
+                'subprocess', 'os.system', 'os.popen'
+            ]
+            
+            if any(pattern in code for pattern in forbidden_patterns):
+                return False
+            
+            # Video processing validation
+            required_elements = ['frame', 'return']
+            if not all(element in code for element in required_elements):
+                return False
+            
+            # Library usage validation
+            expected_libraries = ['cv2', 'np', 'numpy']
+            if not any(lib in code for lib in expected_libraries):
+                return False
+            
+            # Relevance check
+            desc_keywords = description.lower().split()
+            code_lower = code.lower()
+            relevance_score = sum(1 for keyword in desc_keywords if keyword in code_lower)
+            
+            if relevance_score < len(desc_keywords) * 0.3:  # At least 30% relevance
+                return False
+            
+            return True
+            
+        except (SyntaxError, ValueError):
+            return False
+        except Exception:
+            return False
+    
+    def _intelligent_code_selection(self, codes: List[str], description: str, 
+                                  context: Dict[str, Any]) -> str:
+        """Intelligently select the best code based on multiple criteria"""
+        
+        if len(codes) == 1:
+            return codes[0]
+        
+        scored_codes = []
+        
+        for code in codes:
+            score = 0
+            
+            # Complexity appropriateness (30 points max)
+            lines = [l for l in code.split('\n') if l.strip() and not l.strip().startswith('#')]
+            code_complexity = len(lines)
+            
+            if context['complexity_level'] == 'high':
+                score += min(30, code_complexity * 1.5)
+            elif context['complexity_level'] == 'moderate':
+                score += max(0, 30 - abs(code_complexity - 15) * 2)
+            else:
+                score += max(0, 30 - code_complexity)
+            
+            # Relevance score (25 points max)
+            desc_words = set(description.lower().split())
+            code_words = set(code.lower().split())
+            relevance = len(desc_words.intersection(code_words)) / len(desc_words) if desc_words else 0
+            score += relevance * 25
+            
+            # Library usage score (20 points max)
+            preferred_libs = context.get('library_preferences', [])
+            for lib in preferred_libs:
+                if lib == 'opencv' and 'cv2.' in code:
+                    score += 8
+                elif lib == 'numpy' and ('np.' in code or 'numpy.' in code):
+                    score += 6
+                elif lib == 'pillow' and 'PIL' in code:
+                    score += 6
+            
+            # Documentation quality (15 points max)
+            if '"""' in code or "'''" in code:
+                score += 10
+            if '#' in code:
+                comment_count = code.count('#')
+                score += min(5, comment_count)
+            
+            # Performance considerations (10 points max)
+            if context['performance_requirements'] == 'high_speed':
+                if any(term in code for term in ['copy()', '.copy()', 'dtype=']):
+                    score += 5
+                if 'for' in code and 'range' in code:
+                    score -= 3  # Penalize explicit loops for performance
+            
+            scored_codes.append((score, code))
+        
+        # Return highest scoring code
+        scored_codes.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_code = scored_codes[0]
+        
+        logger.debug(f"Selected code with score: {best_score:.1f}")
+        return best_code
+    
+    def _optimize_and_finalize_code(self, code: str, description: str) -> str:
+        """Optimize and finalize the generated code"""
+        
+        # Add comprehensive documentation if missing
+        if '"""' not in code and "'''" not in code:
+            # Extract function name
+            import re
+            func_match = re.search(r'def\s+(\w+)\s*\(', code)
+            func_name = func_match.group(1) if func_match else 'generated_effect'
+            
+            doc_string = f'    """\n    {description}\n    \n    Args:\n        frame: Input video frame (numpy array)\n        \n    Returns:\n        numpy array: Processed video frame\n    """'
+            
+            # Insert documentation after function definition
+            lines = code.split('\n')
+            for i, line in enumerate(lines):
+                if line.strip().startswith('def '):
+                    lines.insert(i + 1, doc_string)
+                    break
+            
+            code = '\n'.join(lines)
+        
+        # Ensure proper imports at the top
+        required_imports = []
+        if 'cv2.' in code and 'import cv2' not in code:
+            required_imports.append('import cv2')
+        if ('np.' in code or 'numpy.' in code) and 'import numpy' not in code:
+            required_imports.append('import numpy as np')
+        if 'PIL' in code and 'from PIL' not in code:
+            required_imports.append('from PIL import Image')
+        
+        if required_imports:
+            import_block = '\n'.join(required_imports) + '\n\n'
+            code = import_block + code
+        
+        # Add type hints if missing
+        if 'def ' in code and '->' not in code:
+            code = code.replace('def ', 'def ', 1).replace('(frame', '(frame: np.ndarray').replace('):', ') -> np.ndarray:', 1)
+        
+        return code
+    
+    def _generate_production_ready_template_code(self, description: str, 
+                                               reference_effects: List[Dict] = None) -> str:
+        """Generate production-ready code using sophisticated template system"""
+        
+        # Analyze description for template selection
+        context = self._analyze_effect_requirements(description)
+        template_type = self._select_optimal_template(description, context)
+        
+        # Generate code using selected template
+        if template_type == 'glitch':
+            return self._generate_glitch_template(description, context)
+        elif template_type == 'color':
+            return self._generate_color_template(description, context)
+        elif template_type == 'motion':
+            return self._generate_motion_template(description, context)
+        elif template_type == 'particle':
+            return self._generate_particle_template(description, context)
+        elif template_type == 'distortion':
+            return self._generate_distortion_template(description, context)
+        elif template_type == 'composite':
+            return self._generate_composite_template(description, context)
+        else:
+            return self._generate_universal_template(description, context)
+    
+    def _select_optimal_template(self, description: str, context: Dict[str, Any]) -> str:
+        """Select the most appropriate template based on description analysis"""
+        
+        # Use effect category from context analysis
+        category = context.get('effect_category', 'general')
+        
+        # Template mapping with confidence scores
+        template_scores = {
+            'glitch': 0,
+            'color': 0,
+            'motion': 0,
+            'particle': 0,
+            'distortion': 0,
+            'composite': 0,
+            'universal': 0.1  # Always a viable option
+        }
+        
+        desc_lower = description.lower()
+        
+        # Score each template type
+        glitch_keywords = ['glitch', 'digital', 'corruption', 'noise', 'static', 'rgb shift']
+        template_scores['glitch'] = sum(0.2 for keyword in glitch_keywords if keyword in desc_lower)
+        
+        color_keywords = ['color', 'hue', 'saturation', 'brightness', 'contrast', 'tint', 'grade']
+        template_scores['color'] = sum(0.15 for keyword in color_keywords if keyword in desc_lower)
+        
+        motion_keywords = ['motion', 'movement', 'tracking', 'stabilize', 'pan', 'zoom']
+        template_scores['motion'] = sum(0.2 for keyword in motion_keywords if keyword in desc_lower)
+        
+        particle_keywords = ['particle', 'spark', 'dust', 'fire', 'smoke', 'stars', 'snow']
+        template_scores['particle'] = sum(0.25 for keyword in particle_keywords if keyword in desc_lower)
+        
+        distortion_keywords = ['distortion', 'warp', 'ripple', 'wave', 'bend', 'twist']
+        template_scores['distortion'] = sum(0.2 for keyword in distortion_keywords if keyword in desc_lower)
+        
+        composite_keywords = ['composite', 'blend', 'mask', 'overlay', 'green screen', 'chroma']
+        template_scores['composite'] = sum(0.2 for keyword in composite_keywords if keyword in desc_lower)
+        
+        # Select highest scoring template
+        best_template = max(template_scores.items(), key=lambda x: x[1])
+        return best_template[0] if best_template[1] > 0.3 else 'universal'
+    
+    def _generate_glitch_template(self, description: str, context: Dict[str, Any]) -> str:
+        """Generate advanced glitch effect template"""
+        
+        intensity = 0.5  # Default intensity
+        if 'subtle' in description.lower():
+            intensity = 0.2
+        elif 'intense' in description.lower() or 'heavy' in description.lower():
+            intensity = 0.8
+        
+        return f'''import cv2
+import numpy as np
+from typing import Tuple, Optional
+
+def glitch_effect(frame: np.ndarray, intensity: float = {intensity}, 
+                 scan_lines: bool = True, rgb_shift: bool = True,
+                 digital_noise: bool = True) -> np.ndarray:
+    """
+    Advanced digital glitch effect with multiple distortion types.
+    
+    {description}
+    
+    Args:
+        frame: Input video frame (numpy array)
+        intensity: Effect intensity (0.0 to 1.0)
+        scan_lines: Enable horizontal scan line glitches
+        rgb_shift: Enable RGB channel shifting
+        digital_noise: Enable digital noise overlay
+        
+    Returns:
+        numpy array: Processed frame with glitch effects
+    """
+    height, width = frame.shape[:2]
+    result = frame.copy().astype(np.float32)
+    
+    if rgb_shift:
+        # RGB channel shifting for chromatic aberration
+        shift_amount = int(intensity * 15)
+        if shift_amount > 0:
+            # Red channel shift
+            result[:-shift_amount, :, 0] = frame[shift_amount:, :, 0]
+            # Blue channel shift  
+            result[shift_amount:, :, 2] = frame[:-shift_amount, :, 2]
+    
+    if scan_lines:
+        # Horizontal scan line corruption
+        num_lines = int(height * intensity * 0.1)
+        for _ in range(num_lines):
+            y = np.random.randint(0, height - 5)
+            line_height = np.random.randint(1, 4)
+            
+            # Create noise for scan line
+            noise = np.random.randint(0, 255, (line_height, width, 3))
+            blend_factor = np.random.uniform(0.3, 0.7)
+            
+            result[y:y+line_height] = (
+                result[y:y+line_height] * (1 - blend_factor) + 
+                noise * blend_factor
+            )
+    
+    if digital_noise:
+        # Digital pixel corruption
+        noise_pixels = int(width * height * intensity * 0.02)
+        for _ in range(noise_pixels):
+            x, y = np.random.randint(0, width), np.random.randint(0, height)
+            result[y, x] = np.random.randint(0, 255, 3)
+    
+    # Data moshing effect for high intensity
+    if intensity > 0.6:
+        block_size = 8
+        num_blocks = int(intensity * 20)
+        
+        for _ in range(num_blocks):
+            x = np.random.randint(0, width - block_size)
+            y = np.random.randint(0, height - block_size)
+            
+            # Duplicate or corrupt block
+            if np.random.random() < 0.5:
+                # Duplicate from random location
+                src_x = np.random.randint(0, width - block_size)
+                src_y = np.random.randint(0, height - block_size)
+                result[y:y+block_size, x:x+block_size] = result[src_y:src_y+block_size, src_x:src_x+block_size]
+            else:
+                # Add noise block
+                result[y:y+block_size, x:x+block_size] = np.random.randint(0, 255, (block_size, block_size, 3))
+    
+    return np.clip(result, 0, 255).astype(np.uint8)
+'''
+    
+    def _generate_color_template(self, description: str, context: Dict[str, Any]) -> str:
+        """Generate advanced color manipulation template"""
+        
+        return f'''import cv2
+import numpy as np
+from typing import Tuple, Optional
+
+def color_effect(frame: np.ndarray, hue_shift: float = 0.1, 
+                saturation_factor: float = 1.2, brightness_offset: int = 10,
+                contrast_factor: float = 1.1, color_temperature: float = 0.0) -> np.ndarray:
+    """
+    Advanced color manipulation and grading effect.
+    
+    {description}
+    
+    Args:
+        frame: Input video frame (numpy array)
+        hue_shift: Hue adjustment (-0.5 to 0.5)
+        saturation_factor: Saturation multiplier (0.0 to 2.0)
+        brightness_offset: Brightness adjustment (-100 to 100)
+        contrast_factor: Contrast multiplier (0.5 to 2.0)
+        color_temperature: Color temperature shift (-1.0 to 1.0)
+        
+    Returns:
+        numpy array: Color-processed frame
+    """
+    # Convert to HSV for hue/saturation adjustments
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
+    
+    # Hue shift
+    if abs(hue_shift) > 0.001:
+        hsv[:, :, 0] = (hsv[:, :, 0] + hue_shift * 180) % 180
+    
+    # Saturation adjustment
+    if abs(saturation_factor - 1.0) > 0.001:
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * saturation_factor, 0, 255)
+    
+    # Convert back to BGR
+    result = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR).astype(np.float32)
+    
+    # Brightness and contrast adjustments
+    if abs(brightness_offset) > 0 or abs(contrast_factor - 1.0) > 0.001:
+        result = result * contrast_factor + brightness_offset
+    
+    # Color temperature adjustment
+    if abs(color_temperature) > 0.001:
+        if color_temperature > 0:  # Warmer (more red/yellow)
+            result[:, :, 0] *= (1 - color_temperature * 0.2)  # Reduce blue
+            result[:, :, 2] *= (1 + color_temperature * 0.1)  # Increase red
+        else:  # Cooler (more blue)
+            result[:, :, 0] *= (1 + abs(color_temperature) * 0.2)  # Increase blue
+            result[:, :, 2] *= (1 - abs(color_temperature) * 0.1)  # Reduce red
+    
+    # Professional color curve adjustment (S-curve for cinematic look)
+    normalized = result / 255.0
+    # Apply subtle S-curve
+    s_curved = 3 * normalized**2 - 2 * normalized**3
+    result = s_curved * 255
+    
+    return np.clip(result, 0, 255).astype(np.uint8)
+'''
+
+    def _generate_universal_template(self, description: str, context: Dict[str, Any]) -> str:
+        """Generate universal effect template for general use"""
+        
+        return f'''import cv2
+import numpy as np
+from typing import Tuple, Optional, Any
+
+def custom_effect(frame: np.ndarray, **kwargs) -> np.ndarray:
+    """
+    Universal video effect processor.
+    
+    {description}
+    
+    Args:
+        frame: Input video frame (numpy array)
+        **kwargs: Effect parameters
+        
+    Returns:
+        numpy array: Processed video frame
+    """
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
+    # Extract common parameters
+    intensity = kwargs.get('intensity', 0.5)
+    blend_mode = kwargs.get('blend_mode', 'normal')
+    
+    # Basic processing pipeline
+    if intensity > 0.1:
+        # Apply primary effect based on description analysis
+        processed = frame.astype(np.float32)
+        
+        # Example processing - adapt based on specific needs
+        if 'blur' in "{description.lower()}":
+            kernel_size = int(intensity * 20) + 1
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            processed = cv2.GaussianBlur(processed, (kernel_size, kernel_size), 0)
+        
+        elif 'sharpen' in "{description.lower()}":
+            # Sharpening kernel
+            kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+            sharpened = cv2.filter2D(processed, -1, kernel)
+            processed = cv2.addWeighted(processed, 1 - intensity, sharpened, intensity, 0)
+        
+        elif 'vintage' in "{description.lower()}":
+            # Vintage film effect
+            # Reduce saturation
+            hsv = cv2.cvtColor(processed.astype(np.uint8), cv2.COLOR_BGR2HSV)
+            hsv[:, :, 1] = hsv[:, :, 1] * 0.7  # Reduce saturation
+            processed = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR).astype(np.float32)
+            
+            # Add warm tint
+            processed[:, :, 0] *= 0.9  # Reduce blue
+            processed[:, :, 2] *= 1.1  # Increase red
+        
+        else:
+            # Generic enhancement
+            # Slight contrast and brightness adjustment
+            processed = processed * (1 + intensity * 0.3) + (intensity * 20)
+        
+        # Blend with original based on intensity
+        result = cv2.addWeighted(
+            frame.astype(np.float32), 1 - intensity,
+            processed, intensity, 0
+        )
+    
+    return np.clip(result, 0, 255).astype(np.uint8)
+'''
+
+    def _create_production_grade_prompt(self, description: str, reference_effects: List[Dict] = None,
+                                      context: Dict[str, Any] = None) -> str:
+        """Create production-grade prompt for CodeLLaMA"""
+        
+        # Build comprehensive context
+        context_str = f"""
+# Professional Video Effects Code Generator
+# Expertise: Computer Vision, Image Processing, Video Effects Programming
+# Libraries: OpenCV, NumPy, Advanced Mathematics
+# Target: Production-ready, optimized video processing code
+
+## Effect Request Analysis:
+- Description: {description}
+- Complexity Level: {context.get('complexity_level', 'moderate') if context else 'moderate'}
+- Performance Requirements: {context.get('performance_requirements', 'standard') if context else 'standard'}
+- Technical Focus: {context.get('technical_complexity', 'moderate') if context else 'moderate'}
+- Creative Focus: {context.get('creative_complexity', 'moderate') if context else 'moderate'}
+
+## Code Generation Guidelines:
+1. Write professional, production-ready Python code
+2. Use OpenCV (cv2) and NumPy for video processing
+3. Include comprehensive docstrings and type hints
+4. Implement proper error handling and bounds checking
+5. Optimize for performance and memory efficiency
+6. Follow PEP 8 coding standards
+
+## Reference Examples:
+"""
+        
+        # Add reference effects if provided
+        if reference_effects:
+            context_str += "### Similar Effects:\n"
+            for i, ref in enumerate(reference_effects[:2], 1):
+                context_str += f"{i}. {ref.get('description', 'Unknown effect')}\n"
+        
+        # Build the specific generation request
+        generation_request = f"""
+## Generate Effect Code:
+Create a complete Python function that implements: "{description}"
+
+Requirements:
+- Function name should be descriptive (e.g., 'glitch_effect', 'color_grade_effect')
+- Accept frame (numpy array) as primary parameter
+- Include adjustable parameters for effect intensity and variations
+- Return processed frame as numpy array
+- Include comprehensive docstring with parameter descriptions
+- Use type hints for all parameters and return values
+- Implement proper input validation and error handling
+- Optimize for real-time video processing where possible
+
+def """
+        
+        return context_str + generation_request
+
     def _initialize_model(self):
         """Try to initialize CodeLLaMA model on-demand"""
         try:

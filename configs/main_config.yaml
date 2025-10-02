@@ -9,7 +9,7 @@ paths:
   output_dir: ./outputs
 
 teachers:
-  text_model: meta-llama/Llama-4-70b
+  text_model: zai-org/GLM-4.5  # Replaced with a top-performing, open-source agentic LLM.
   video_model: OpenGVLab/InternVideo2-Large
   audio_models:
     - openai/whisper-large-v3
@@ -72,7 +72,7 @@ rlhf:
 
 # Enhanced self-coding configuration
 self_coding:
-  model_name: codellama/CodeLlama-7b-Python-hf
+  model_name: codellama/CodeLlama-13b-Python-hf  # Upgraded to a more capable CodeLlama model
   device: auto  # auto-detect CUDA/CPU
   max_length: 1024
   

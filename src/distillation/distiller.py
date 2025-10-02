@@ -98,137 +98,242 @@ class KnowledgeDistiller:
             self.demucs = None
     
     def _load_rt_detr(self):
-        """Load RT-DETR model for real-time object detection"""
-        try:
-            # First try to load actual RT-DETR model
+        """
+        Load RT-DETR model for real-time object detection with config-driven model selection.
+        Prioritizes models specified in configuration for advanced video understanding.
+        """
+        # Get model configuration from config
+        teacher_models = self.config.get('models', {}).get('teacher_models', {})
+        rt_detr_config = teacher_models.get('rt_detr', {})
+        
+        # Priority order: config model -> latest RT-DETR -> DETR -> RetinaNet fallback
+        model_candidates = []
+        
+        # Add configured model if available
+        if rt_detr_config.get('model_name'):
+            model_candidates.append({
+                'name': rt_detr_config['model_name'],
+                'type': 'configured_rt_detr',
+                'processor_class': 'RTDetrImageProcessor',
+                'model_class': 'RTDetrForObjectDetection'
+            })
+        
+        # Add standard RT-DETR options
+        model_candidates.extend([
+            {
+                'name': 'microsoft/rt-detr-resnet-101', 
+                'type': 'rt_detr_101',
+                'processor_class': 'RTDetrImageProcessor',
+                'model_class': 'RTDetrForObjectDetection'
+            },
+            {
+                'name': 'microsoft/rt-detr-resnet-50',
+                'type': 'rt_detr_50', 
+                'processor_class': 'RTDetrImageProcessor',
+                'model_class': 'RTDetrForObjectDetection'
+            },
+            {
+                'name': 'facebook/detr-resnet-101',
+                'type': 'detr_101',
+                'processor_class': 'DetrImageProcessor', 
+                'model_class': 'DetrForObjectDetection'
+            },
+            {
+                'name': 'facebook/detr-resnet-50',
+                'type': 'detr_50',
+                'processor_class': 'DetrImageProcessor',
+                'model_class': 'DetrForObjectDetection'
+            }
+        ])
+        
+        # Try loading models in priority order
+        for candidate in model_candidates:
             try:
-                from transformers import RTDetrImageProcessor, RTDetrForObjectDetection
-                import torchvision.transforms as T
+                logger.info(f"🔍 Attempting to load {candidate['name']} ({candidate['type']})")
                 
-                model_name = "microsoft/rt-detr-resnet-50"
-                processor = RTDetrImageProcessor.from_pretrained(model_name)
-                model = RTDetrForObjectDetection.from_pretrained(model_name)
+                # Import appropriate classes
+                if candidate['processor_class'] == 'RTDetrImageProcessor':
+                    try:
+                        from transformers import RTDetrImageProcessor, RTDetrForObjectDetection
+                        processor_class = RTDetrImageProcessor
+                        model_class = RTDetrForObjectDetection
+                    except ImportError:
+                        logger.warning(f"RT-DETR classes not available, skipping {candidate['name']}")
+                        continue
+                        
+                elif candidate['processor_class'] == 'DetrImageProcessor':
+                    from transformers import DetrImageProcessor, DetrForObjectDetection
+                    processor_class = DetrImageProcessor
+                    model_class = DetrForObjectDetection
+                else:
+                    logger.warning(f"Unknown processor class: {candidate['processor_class']}")
+                    continue
+                
+                # Load model and processor
+                processor = processor_class.from_pretrained(candidate['name'])
+                model = model_class.from_pretrained(candidate['name'])
                 model.eval()
                 model.to(self.device)
                 
-                logger.info("✅ Loaded actual RT-DETR model")
+                logger.info(f"✅ Successfully loaded {candidate['name']} for object detection")
+                
                 return {
                     'model': model,
                     'processor': processor,
-                    'type': 'rt_detr'
+                    'type': candidate['type'],
+                    'model_name': candidate['name'],
+                    'capabilities': {
+                        'real_time': 'rt_detr' in candidate['type'],
+                        'accuracy': 'resnet-101' in candidate['name'],
+                        'speed': 'resnet-50' in candidate['name']
+                    }
                 }
                 
             except Exception as e:
-                logger.warning(f"RT-DETR not available, trying DETR: {e}")
-                
-                # Try standard DETR as a good alternative
-                from transformers import DetrImageProcessor, DetrForObjectDetection
-                
-                model_name = "facebook/detr-resnet-50"
-                processor = DetrImageProcessor.from_pretrained(model_name)
-                model = DetrForObjectDetection.from_pretrained(model_name)
-                model.eval()
-                model.to(self.device)
-                
-                logger.info("✅ Loaded DETR model as RT-DETR alternative")
-                return {
-                    'model': model,
-                    'processor': processor,
-                    'type': 'detr'
-                }
-                
-        except Exception as e:
-            logger.warning(f"Advanced object detection not available: {e}")
+                logger.warning(f"Failed to load {candidate['name']}: {e}")
+                continue
+        
+        # Ultimate fallback to RetinaNet
+        logger.warning("All transformer-based object detection models failed, using RetinaNet fallback")
+        try:
+            import torchvision.transforms as T
+            from torchvision.models.detection import retinanet_resnet50_fpn
             
-            # Fallback to RetinaNet only if advanced models fail
-            try:
-                import torchvision.transforms as T
-                from torchvision.models.detection import retinanet_resnet50_fpn
-                
-                model = retinanet_resnet50_fpn(pretrained=True)
-                model.eval()
-                model.to(self.device)
-                
-                transform = T.Compose([
-                    T.ToPILImage(),
-                    T.Resize((800, 800)),
-                    T.ToTensor(),
-                    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                
-                logger.info("⚠️ Using RetinaNet fallback for object detection")
-                return {
-                    'model': model,
-                    'transform': transform,
-                    'type': 'retinanet'
+            model = retinanet_resnet50_fpn(pretrained=True)
+            model.eval()
+            model.to(self.device)
+            
+            transform = T.Compose([
+                T.ToPILImage(),
+                T.Resize((800, 800)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            logger.info("⚠️ Using RetinaNet fallback for object detection")
+            return {
+                'model': model,
+                'transform': transform,
+                'type': 'retinanet_fallback',
+                'model_name': 'torchvision_retinanet_resnet50_fpn',
+                'capabilities': {
+                    'real_time': False,
+                    'accuracy': 'medium',
+                    'speed': 'medium'
                 }
-                
-            except ImportError:
-                logger.error("No object detection model available")
-                return None
+            }
+            
+        except ImportError:
+            logger.error("❌ No object detection model available - all options failed")
+            return None
     
     def _load_hq_sam(self):
-        """Load HQ-SAM model for high-quality segmentation"""
-        try:
-            # Try to load actual SAM model
+        """
+        Load HQ-SAM model for high-quality segmentation with config-driven model selection.
+        Prioritizes models specified in configuration for advanced video segmentation.
+        """
+        # Get model configuration from config
+        teacher_models = self.config.get('models', {}).get('teacher_models', {})
+        sam_config = teacher_models.get('hq_sam', {})
+        
+        # Priority order: config model -> SAM variants by size -> DeepLab fallback
+        model_candidates = []
+        
+        # Add configured model if available
+        if sam_config.get('model_name'):
+            model_candidates.append({
+                'name': sam_config['model_name'],
+                'type': 'configured_sam',
+                'size': sam_config.get('model_size', 'large')
+            })
+        
+        # Add standard SAM model variants in order of capability
+        model_candidates.extend([
+            {
+                'name': 'facebook/sam-vit-huge',
+                'type': 'sam_huge',
+                'size': 'huge'
+            },
+            {
+                'name': 'facebook/sam-vit-large', 
+                'type': 'sam_large',
+                'size': 'large'
+            },
+            {
+                'name': 'facebook/sam-vit-base',
+                'type': 'sam_base',
+                'size': 'base'
+            }
+        ])
+        
+        # Try loading SAM models in priority order
+        for candidate in model_candidates:
             try:
+                logger.info(f"🔍 Attempting to load SAM model {candidate['name']} ({candidate['type']})")
+                
                 from transformers import SamModel, SamProcessor
                 
-                model_name = "facebook/sam-vit-huge"
-                processor = SamProcessor.from_pretrained(model_name)
-                model = SamModel.from_pretrained(model_name)
+                # Load model and processor
+                processor = SamProcessor.from_pretrained(candidate['name'])
+                model = SamModel.from_pretrained(candidate['name'])
                 model.eval()
                 model.to(self.device)
                 
-                logger.info("✅ Loaded actual SAM model")
+                logger.info(f"✅ Successfully loaded {candidate['name']} for segmentation")
+                
                 return {
                     'model': model,
                     'processor': processor,
-                    'type': 'sam'
-                }
-                
-            except Exception as e:
-                logger.warning(f"SAM not available, trying SAM-B: {e}")
-                
-                # Try smaller SAM variant
-                try:
-                    model_name = "facebook/sam-vit-base"
-                    processor = SamProcessor.from_pretrained(model_name)
-                    model = SamModel.from_pretrained(model_name)
-                    model.eval()
-                    model.to(self.device)
-                    
-                    logger.info("✅ Loaded SAM-B model")
-                    return {
-                        'model': model,
-                        'processor': processor,
-                        'type': 'sam_base'
+                    'type': candidate['type'],
+                    'model_name': candidate['name'],
+                    'model_size': candidate['size'],
+                    'capabilities': {
+                        'high_quality': candidate['size'] in ['huge', 'large'],
+                        'speed': 'fast' if candidate['size'] == 'base' else 'medium',
+                        'memory_efficient': candidate['size'] == 'base',
+                        'precision': 'high' if candidate['size'] != 'base' else 'medium'
                     }
-                    
-                except Exception as e2:
-                    logger.warning(f"SAM-B also not available: {e2}")
-                    raise e2
-                    
-        except Exception as e:
-            logger.warning(f"Advanced segmentation not available: {e}")
-            
-            # Fallback to DeepLabV3 only if SAM models fail
-            try:
-                import torchvision.models.segmentation as seg_models
-                
-                model = seg_models.deeplabv3_resnet50(pretrained=True)
-                model.eval()
-                model.to(self.device)
-                
-                logger.info("⚠️ Using DeepLabV3 fallback for segmentation")
-                return {
-                    'model': model,
-                    'type': 'deeplab'
                 }
                 
             except Exception as e:
-                logger.error(f"No segmentation model available: {e}")
-                return None
+                logger.warning(f"Failed to load SAM model {candidate['name']}: {e}")
+                continue
+        
+        # Fallback to DeepLabV3 if all SAM models fail
+        logger.warning("All SAM models failed, using DeepLabV3 fallback for segmentation")
+        try:
+            import torchvision.models.segmentation as seg_models
+            import torchvision.transforms as T
+            
+            model = seg_models.deeplabv3_resnet50(pretrained=True)
+            model.eval()
+            model.to(self.device)
+            
+            # Create transform for DeepLab preprocessing
+            transform = T.Compose([
+                T.ToPILImage(),
+                T.Resize((520, 520)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            logger.info("⚠️ Using DeepLabV3 fallback for segmentation")
+            return {
+                'model': model,
+                'transform': transform,
+                'type': 'deeplab_fallback',
+                'model_name': 'torchvision_deeplabv3_resnet50',
+                'capabilities': {
+                    'high_quality': False,
+                    'speed': 'fast',
+                    'memory_efficient': True,
+                    'precision': 'medium'
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ No segmentation model available - all options failed: {e}")
+            return None
     
     def _load_beatnet(self):
         """Load BeatNet for music structure and rhythm analysis"""
