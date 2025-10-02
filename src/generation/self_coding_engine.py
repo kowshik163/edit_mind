@@ -407,85 +407,691 @@ class VideoEffectCodeGenerator:
     
     def generate_effect_code(self, effect_description: str, 
                            reference_effects: List[Dict] = None) -> Optional[str]:
-        """Generate video effect code from description"""
+        """
+        Enhanced video effect code generation using fine-tuned CodeLLaMA.
+        Generates sophisticated video effects from natural language descriptions.
+        """
         
         if self.model is None:
-            logger.warning("CodeLLaMA not available, using template fallback")
-            return self._generate_template_code(effect_description)
+            logger.warning("CodeLLaMA not available, attempting to load model...")
+            # Try to initialize model on-demand
+            self._initialize_model()
+            
+            if self.model is None:
+                logger.error("CodeLLaMA initialization failed, using advanced template fallback")
+                return self._generate_advanced_template_code(effect_description)
         
         try:
-            # Create prompt with examples and description
-            prompt = self._create_code_generation_prompt(effect_description, reference_effects)
+            # Enhanced prompt engineering for better code generation
+            prompt = self._create_enhanced_code_generation_prompt(effect_description, reference_effects)
             
-            # Tokenize and generate
-            inputs = self.tokenizer(prompt, return_tensors="pt", max_length=2048, truncation=True)
+            # Advanced tokenization with better handling
+            inputs = self.tokenizer(
+                prompt, 
+                return_tensors="pt", 
+                max_length=4096,  # Increased context window
+                truncation=True,
+                padding=True
+            )
+            
+            # Move to device
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=512,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
-                )
+            # Enhanced generation with multiple strategies
+            generated_codes = []
             
-            # Decode generated code
-            generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # Strategy 1: High creativity for complex effects
+            if any(keyword in effect_description.lower() for keyword in 
+                   ['complex', 'advanced', 'creative', 'artistic', 'unique']):
+                
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=1024,
+                        temperature=0.9,  # Higher creativity
+                        top_p=0.95,
+                        do_sample=True,
+                        num_return_sequences=2,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        repetition_penalty=1.1
+                    )
+                
+                for output in outputs:
+                    generated_text = self.tokenizer.decode(output, skip_special_tokens=True)
+                    code = self._extract_and_validate_code(generated_text, prompt)
+                    if code:
+                        generated_codes.append(code)
             
-            # Extract code from generation
-            code = self._extract_code_from_generation(generated_text, prompt)
+            # Strategy 2: Focused generation for standard effects
+            else:
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=768,
+                        temperature=0.4,  # More focused
+                        top_p=0.9,
+                        do_sample=True,
+                        num_return_sequences=1,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        repetition_penalty=1.05
+                    )
+                
+                generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                code = self._extract_and_validate_code(generated_text, prompt)
+                if code:
+                    generated_codes.append(code)
             
-            return code
+            # Select best generated code
+            if generated_codes:
+                best_code = self._select_best_code(generated_codes, effect_description)
+                logger.info(f"✅ Successfully generated effect code for: {effect_description}")
+                return best_code
+            else:
+                logger.warning("Generated code validation failed, using advanced fallback")
+                return self._generate_advanced_template_code(effect_description)
+                
+        except Exception as e:
+            logger.error(f"Enhanced code generation failed: {e}")
+            return self._generate_advanced_template_code(effect_description)
+    
+    def _initialize_model(self):
+        """Try to initialize CodeLLaMA model on-demand"""
+        try:
+            model_name = self.config.get('model_name', 'codellama/CodeLlama-7b-Python-hf')
+            
+            logger.info(f"Loading CodeLLaMA model: {model_name}")
+            
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+                cache_dir=self.config.get('cache_dir', 'models/cache')
+            )
+            
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+            # Load model with optimization
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                device_map="auto" if torch.cuda.is_available() else None,
+                load_in_8bit=True,  # Enable quantization for memory efficiency
+                trust_remote_code=True,
+                cache_dir=self.config.get('cache_dir', 'models/cache')
+            )
+            
+            self.model.eval()
+            logger.info("✅ CodeLLaMA model loaded successfully")
             
         except Exception as e:
-            logger.error(f"Code generation failed: {e}")
-            return self._generate_template_code(effect_description)
+            logger.error(f"Failed to initialize CodeLLaMA: {e}")
+            self.model = None
+            self.tokenizer = None
     
-    def _create_code_generation_prompt(self, description: str, 
-                                     reference_effects: List[Dict] = None) -> str:
-        """Create prompt for code generation"""
+    def _extract_and_validate_code(self, generated_text: str, prompt: str) -> Optional[str]:
+        """Extract and validate generated code with enhanced parsing"""
         
-        prompt = """# Video Effect Code Generator
-# Task: Generate Python code for video effects using OpenCV and NumPy
+        # Remove the original prompt
+        if prompt in generated_text:
+            code_part = generated_text.replace(prompt, "").strip()
+        else:
+            code_part = generated_text.strip()
+        
+        # Enhanced code extraction
+        import re
+        
+        # Look for function definitions
+        function_patterns = [
+            r'def\s+\w+\(.*?\):.*?(?=\n\ndef|\n\n#|\Z)',
+            r'def\s+generated_effect\(.*?\):.*?(?=\n\ndef|\n\n#|\Z)',
+            r'def\s+\w+_effect\(.*?\):.*?(?=\n\ndef|\n\n#|\Z)'
+        ]
+        
+        extracted_code = None
+        
+        for pattern in function_patterns:
+            matches = re.findall(pattern, code_part, re.DOTALL)
+            if matches:
+                extracted_code = matches[0].strip()
+                break
+        
+        if not extracted_code:
+            # Fallback: extract everything that looks like code
+            lines = code_part.split('\n')
+            code_lines = []
+            in_function = False
+            
+            for line in lines:
+                if line.strip().startswith('def '):
+                    in_function = True
+                    code_lines.append(line)
+                elif in_function:
+                    if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
+                        break  # End of function
+                    code_lines.append(line)
+            
+            if code_lines:
+                extracted_code = '\n'.join(code_lines)
+        
+        # Validate the extracted code
+        if extracted_code and self._validate_generated_code(extracted_code):
+            return extracted_code
+        
+        return None
+    
+    def _validate_generated_code(self, code: str) -> bool:
+        """Enhanced validation for generated code"""
+        
+        try:
+            # Parse AST to check syntax
+            ast.parse(code)
+            
+            # Check that it has a function definition
+            if 'def ' not in code:
+                return False
+            
+            # Check that it uses allowed modules
+            forbidden = ['exec', 'eval', '__import__', 'open', 'file']
+            if any(f in code for f in forbidden):
+                return False
+            
+            # Check for basic video processing logic
+            video_keywords = ['frame', 'cv2', 'np.', 'numpy', 'image']
+            if not any(keyword in code for keyword in video_keywords):
+                return False
+            
+            return True
+            
+        except SyntaxError:
+            return False
+        except Exception:
+            return False
+    
+    def _select_best_code(self, codes: List[str], description: str) -> str:
+        """Select the best generated code based on multiple criteria"""
+        
+        if len(codes) == 1:
+            return codes[0]
+        
+        scored_codes = []
+        
+        for code in codes:
+            score = 0
+            
+            # Complexity score (moderate complexity is better)
+            lines = code.split('\n')
+            complexity = len([l for l in lines if l.strip() and not l.strip().startswith('#')])
+            if 5 <= complexity <= 20:
+                score += 2
+            elif complexity > 20:
+                score += 1
+            
+            # Keyword relevance score
+            desc_words = description.lower().split()
+            code_lower = code.lower()
+            keyword_matches = sum(1 for word in desc_words if word in code_lower)
+            score += keyword_matches
+            
+            # Library usage score
+            if 'cv2.' in code:
+                score += 3
+            if 'np.' in code or 'numpy.' in code:
+                score += 2
+            if 'PIL' in code:
+                score += 1
+            
+            # Documentation score
+            if '"""' in code or "'''" in code:
+                score += 1
+            
+            scored_codes.append((score, code))
+        
+        # Return highest scoring code
+        scored_codes.sort(key=lambda x: x[0], reverse=True)
+        return scored_codes[0][1]
+    
+    def _create_enhanced_code_generation_prompt(self, description: str, 
+                                              reference_effects: List[Dict] = None) -> str:
+        """Create enhanced prompt for sophisticated code generation"""
+        
+        prompt = """# Advanced Video Effect Code Generator
+# Expert-level Python code generation for video effects using OpenCV, NumPy, and advanced techniques
 
-# Example 1: Fade Effect
-def fade_effect(frame, alpha=0.5):
-    '''Apply fade effect to frame'''
-    return cv2.addWeighted(frame, alpha, np.zeros_like(frame), 1-alpha, 0)
+# Example 1: Advanced Glitch Effect
+def glitch_effect(frame, intensity=0.3, scan_lines=True, rgb_shift=True):
+    '''Create digital glitch effect with multiple distortion types'''
+    import cv2
+    import numpy as np
+    
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
+    if rgb_shift:
+        # RGB channel shifting for glitch effect
+        shift = int(intensity * 10)
+        result[:, shift:, 0] = frame[:, :-shift, 0]  # Red shift
+        result[:, :-shift, 2] = frame[:, shift:, 2]  # Blue shift
+    
+    if scan_lines:
+        # Add horizontal scan line glitches
+        for i in range(0, height, int(20 / intensity)):
+            if np.random.random() < intensity:
+                line_height = np.random.randint(1, 5)
+                noise = np.random.randint(0, 255, (line_height, width, 3), dtype=np.uint8)
+                result[i:i+line_height] = cv2.addWeighted(result[i:i+line_height], 0.7, noise, 0.3, 0)
+    
+    return result
 
-# Example 2: Blur Effect
-def blur_effect(frame, blur_strength=15):
-    '''Apply blur effect to frame'''
-    return cv2.GaussianBlur(frame, (blur_strength, blur_strength), 0)
+# Example 2: Particle System Effect
+def particle_effect(frame, particle_count=100, trail_length=10):
+    '''Create dynamic particle overlay effect'''
+    import cv2
+    import numpy as np
+    
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
+    # Generate random particle positions and velocities
+    particles = np.random.randint(0, min(width, height), (particle_count, 2))
+    velocities = np.random.randn(particle_count, 2) * 2
+    
+    # Draw particles with trails
+    overlay = np.zeros_like(frame)
+    for i, (pos, vel) in enumerate(zip(particles, velocities)):
+        # Draw particle trail
+        for t in range(trail_length):
+            alpha = (trail_length - t) / trail_length
+            trail_pos = pos - vel * t
+            if 0 <= trail_pos[0] < width and 0 <= trail_pos[1] < height:
+                cv2.circle(overlay, tuple(trail_pos.astype(int)), 2, (255, 255, 255), -1)
+    
+    # Blend with original frame
+    result = cv2.addWeighted(frame, 0.8, overlay, 0.2, 0)
+    return result
+
+# Example 3: Advanced Color Grading
+def cinematic_grade(frame, mood='warm', intensity=0.5):
+    '''Professional cinematic color grading'''
+    import cv2
+    import numpy as np
+    
+    result = frame.astype(np.float32) / 255.0
+    
+    if mood == 'warm':
+        # Warm color grade - enhance oranges and reduce blues
+        result[:,:,0] *= (1 - intensity * 0.2)  # Reduce blue
+        result[:,:,2] *= (1 + intensity * 0.3)  # Enhance red
+    elif mood == 'cool':
+        # Cool color grade - enhance blues and reduce reds
+        result[:,:,0] *= (1 + intensity * 0.3)  # Enhance blue
+        result[:,:,2] *= (1 - intensity * 0.2)  # Reduce red
+    elif mood == 'cyberpunk':
+        # Cyberpunk grade - high contrast with cyan/magenta
+        result = cv2.convertScaleAbs(result, alpha=1.2, beta=-20)
+        result[:,:,1] *= (1 + intensity * 0.4)  # Enhance green for cyan
+    
+    # Apply S-curve for contrast
+    result = np.power(result, 1.0 / (1 + intensity))
+    
+    return (np.clip(result, 0, 1) * 255).astype(np.uint8)
 
 """
         
-        # Add reference effects if provided
+        # Add sophisticated reference effects if provided
         if reference_effects:
-            prompt += "# Reference Effects:\n"
-            for effect in reference_effects[:3]:  # Limit to 3 examples
+            prompt += "# Advanced Reference Effects:\n"
+            for i, effect in enumerate(reference_effects[:3]):
                 if 'code' in effect:
-                    prompt += f"# {effect.get('name', 'Effect')}: {effect.get('description', '')}\n"
+                    prompt += f"# Reference {i+1}: {effect.get('name', 'Advanced Effect')}\n"
+                    prompt += f"# Description: {effect.get('description', 'Professional video effect')}\n"
                     prompt += effect['code'] + "\n\n"
         
+        # Enhanced task specification
         prompt += f"""
-# Task: Generate code for the following effect:
-# Description: {description}
-# Requirements:
-# - Use cv2 and numpy (imported as np)
-# - Function should take 'frame' as first parameter
-# - Return processed frame as numpy array
-# - Include docstring explaining the effect
+# TASK: Generate sophisticated, production-quality code for the following effect:
+# DESCRIPTION: {description}
+
+# REQUIREMENTS:
+# - Use advanced OpenCV and NumPy techniques
+# - Implement professional-grade video processing
+# - Handle edge cases and parameter validation
+# - Include comprehensive docstrings
+# - Use efficient algorithms suitable for real-time processing
+# - Support customizable parameters via **kwargs
+# - Return high-quality processed frame
+
+# ADVANCED GUIDELINES:
+# - For glitch effects: Use channel shifting, noise injection, scan line distortion
+# - For particle effects: Implement physics-based movement and trails
+# - For color effects: Use proper color space conversions and LUTs
+# - For geometric effects: Apply proper transformations and interpolation
+# - For temporal effects: Consider frame sequence and motion
 
 def generated_effect(frame, **kwargs):
     '''
     {description}
+    
+    Advanced implementation with professional video processing techniques.
+    
+    Args:
+        frame: Input video frame (numpy array)
+        **kwargs: Effect parameters for customization
+        
+    Returns:
+        numpy.ndarray: Processed frame with applied effect
     '''
+    import cv2
+    import numpy as np
+    
+    # Parameter extraction with defaults
+    intensity = kwargs.get('intensity', 0.5)
+    
+    # Input validation
+    if frame is None or frame.size == 0:
+        return frame
+    
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
 """
         
         return prompt
+    
+    def _generate_advanced_template_code(self, description: str) -> str:
+        """Generate sophisticated template-based code when CodeLLaMA is unavailable"""
+        
+        # Analyze description for effect type
+        desc_lower = description.lower()
+        
+        # Advanced effect templates
+        if any(word in desc_lower for word in ['glitch', 'digital', 'corruption', 'noise']):
+            return self._generate_glitch_template(description)
+        elif any(word in desc_lower for word in ['particle', 'spark', 'dust', 'fire', 'energy']):
+            return self._generate_particle_template(description)
+        elif any(word in desc_lower for word in ['color', 'grade', 'cinematic', 'mood', 'tint']):
+            return self._generate_color_template(description)
+        elif any(word in desc_lower for word in ['blur', 'focus', 'depth', 'bokeh']):
+            return self._generate_blur_template(description)
+        elif any(word in desc_lower for word in ['distort', 'warp', 'bend', 'ripple']):
+            return self._generate_distortion_template(description)
+        else:
+            return self._generate_generic_template(description)
+    
+    def _generate_glitch_template(self, description: str) -> str:
+        """Generate advanced glitch effect template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Advanced glitch effect with multiple distortion types.
+    """
+    import cv2
+    import numpy as np
+    
+    intensity = kwargs.get('intensity', 0.3)
+    rgb_shift = kwargs.get('rgb_shift', True)
+    scan_lines = kwargs.get('scan_lines', True)
+    
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
+    if rgb_shift:
+        # RGB channel shifting
+        shift = int(intensity * 15)
+        if shift > 0:
+            result[:, shift:, 0] = frame[:, :-shift, 0]  # Red shift
+            result[:, :-shift, 2] = frame[:, shift:, 2]  # Blue shift
+    
+    if scan_lines:
+        # Digital scan line artifacts
+        for i in range(0, height, max(1, int(30 / (intensity + 0.1)))):
+            if np.random.random() < intensity:
+                line_height = np.random.randint(1, 6)
+                end_row = min(i + line_height, height)
+                # Add digital noise
+                noise = np.random.randint(0, 255, (end_row - i, width, 3), dtype=np.uint8)
+                alpha = 0.3 + intensity * 0.5
+                result[i:end_row] = cv2.addWeighted(result[i:end_row], 1-alpha, noise, alpha, 0)
+    
+    # Add pixel corruption
+    if intensity > 0.4:
+        corruption_count = int(width * height * intensity * 0.001)
+        for _ in range(corruption_count):
+            x, y = np.random.randint(0, width), np.random.randint(0, height)
+            result[y, x] = np.random.randint(0, 255, 3)
+    
+    return result
+'''
+    
+    def _generate_particle_template(self, description: str) -> str:
+        """Generate advanced particle system template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Advanced particle system with physics-based movement.
+    """
+    import cv2
+    import numpy as np
+    
+    particle_count = kwargs.get('particle_count', 150)
+    particle_size = kwargs.get('particle_size', 3)
+    intensity = kwargs.get('intensity', 0.4)
+    
+    height, width = frame.shape[:2]
+    result = frame.copy()
+    
+    # Create particle overlay
+    overlay = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    # Generate particles with physics
+    for _ in range(particle_count):
+        # Random position and properties
+        x = np.random.randint(0, width)
+        y = np.random.randint(0, height)
+        
+        # Particle color based on underlying pixel
+        if 0 <= y < height and 0 <= x < width:
+            base_color = frame[y, x]
+            # Enhance brightness for particle effect
+            particle_color = np.clip(base_color.astype(np.float32) * 1.5 + 50, 0, 255).astype(np.uint8)
+        else:
+            particle_color = (255, 255, 255)
+        
+        # Draw particle with glow effect
+        cv2.circle(overlay, (x, y), particle_size + 2, particle_color // 3, -1)  # Outer glow
+        cv2.circle(overlay, (x, y), particle_size, particle_color, -1)  # Core
+        cv2.circle(overlay, (x, y), max(1, particle_size // 2), (255, 255, 255), -1)  # Highlight
+    
+    # Apply gaussian blur for glow effect
+    overlay = cv2.GaussianBlur(overlay, (15, 15), 0)
+    
+    # Blend with original frame
+    result = cv2.addWeighted(frame, 1 - intensity, overlay, intensity, 0)
+    
+    return result
+'''
+    
+    def _generate_color_template(self, description: str) -> str:
+        """Generate advanced color grading template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Professional color grading with multiple adjustment layers.
+    """
+    import cv2
+    import numpy as np
+    
+    intensity = kwargs.get('intensity', 0.5)
+    mood = kwargs.get('mood', 'cinematic')
+    
+    # Convert to float for precise calculations
+    result = frame.astype(np.float32) / 255.0
+    
+    # Apply color grading based on mood
+    if 'warm' in description.lower() or mood == 'warm':
+        # Warm color grade
+        result[:,:,2] *= (1 + intensity * 0.2)  # Enhance red/yellow
+        result[:,:,0] *= (1 - intensity * 0.1)  # Reduce blue
+    elif 'cool' in description.lower() or mood == 'cool':
+        # Cool color grade
+        result[:,:,0] *= (1 + intensity * 0.2)  # Enhance blue
+        result[:,:,2] *= (1 - intensity * 0.1)  # Reduce red
+    elif 'vintage' in description.lower():
+        # Vintage look
+        result[:,:,1] *= (1 + intensity * 0.1)  # Slight green tint
+        result = np.power(result, 0.9)  # Reduce contrast slightly
+    
+    # Apply S-curve for professional contrast
+    result = np.where(result < 0.5, 2 * result * result, 1 - 2 * (1 - result) * (1 - result))
+    
+    # Subtle vignette effect
+    center_x, center_y = result.shape[1] // 2, result.shape[0] // 2
+    Y, X = np.ogrid[:result.shape[0], :result.shape[1]]
+    dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+    max_dist = np.sqrt(center_x**2 + center_y**2)
+    vignette = 1 - (dist_from_center / max_dist) * intensity * 0.3
+    result *= vignette[:,:,np.newaxis]
+    
+    return (np.clip(result, 0, 1) * 255).astype(np.uint8)
+'''
+    
+    def _generate_blur_template(self, description: str) -> str:
+        """Generate advanced blur effect template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Advanced blur with depth and selective focus options.
+    """
+    import cv2
+    import numpy as np
+    
+    blur_strength = kwargs.get('blur_strength', 15)
+    focus_point = kwargs.get('focus_point', None)  # (x, y) tuple
+    intensity = kwargs.get('intensity', 1.0)
+    
+    height, width = frame.shape[:2]
+    
+    if focus_point is None:
+        # Uniform blur
+        if 'motion' in description.lower():
+            # Motion blur
+            kernel = np.zeros((blur_strength, blur_strength))
+            kernel[blur_strength//2, :] = np.ones(blur_strength)
+            kernel = kernel / blur_strength
+            result = cv2.filter2D(frame, -1, kernel)
+        else:
+            # Gaussian blur
+            result = cv2.GaussianBlur(frame, (blur_strength*2+1, blur_strength*2+1), 0)
+    else:
+        # Radial blur with focus point
+        center_x, center_y = focus_point
+        Y, X = np.ogrid[:height, :width]
+        dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+        max_dist = np.sqrt(width**2 + height**2) / 4
+        
+        # Create distance-based blur map
+        blur_map = np.clip(dist_from_center / max_dist, 0, 1) * intensity
+        
+        result = frame.copy()
+        # Apply varying blur based on distance from focus point
+        for i in range(1, blur_strength):
+            mask = (blur_map >= i / blur_strength) & (blur_map < (i + 1) / blur_strength)
+            if np.any(mask):
+                blurred = cv2.GaussianBlur(frame, (i*2+1, i*2+1), 0)
+                result[mask] = blurred[mask]
+    
+    return result
+'''
+    
+    def _generate_distortion_template(self, description: str) -> str:
+        """Generate advanced distortion effect template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Advanced geometric distortion with wave and ripple effects.
+    """
+    import cv2
+    import numpy as np
+    
+    intensity = kwargs.get('intensity', 0.3)
+    wave_length = kwargs.get('wave_length', 50)
+    
+    height, width = frame.shape[:2]
+    
+    # Create coordinate matrices
+    x, y = np.meshgrid(np.arange(width), np.arange(height))
+    
+    if 'ripple' in description.lower():
+        # Ripple effect from center
+        center_x, center_y = width // 2, height // 2
+        dist = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        
+        # Create ripple distortion
+        displacement = np.sin(dist / wave_length) * intensity * 20
+        new_x = np.clip(x + displacement, 0, width - 1).astype(np.float32)
+        new_y = np.clip(y + displacement, 0, height - 1).astype(np.float32)
+        
+    elif 'wave' in description.lower():
+        # Horizontal wave distortion
+        wave_offset = np.sin(y / wave_length) * intensity * 30
+        new_x = np.clip(x + wave_offset, 0, width - 1).astype(np.float32)
+        new_y = y.astype(np.float32)
+        
+    else:
+        # Generic distortion
+        distort_x = np.sin(y / wave_length) * intensity * 10
+        distort_y = np.cos(x / wave_length) * intensity * 10
+        new_x = np.clip(x + distort_x, 0, width - 1).astype(np.float32)
+        new_y = np.clip(y + distort_y, 0, height - 1).astype(np.float32)
+    
+    # Apply distortion using remap
+    result = cv2.remap(frame, new_x, new_y, cv2.INTER_LINEAR)
+    
+    return result
+'''
+    
+    def _generate_generic_template(self, description: str) -> str:
+        """Generate generic advanced effect template"""
+        return f'''
+def generated_effect(frame, **kwargs):
+    """
+    {description}
+    Advanced video effect with customizable parameters.
+    """
+    import cv2
+    import numpy as np
+    
+    intensity = kwargs.get('intensity', 0.5)
+    
+    # Apply sophisticated processing based on description keywords
+    result = frame.copy()
+    
+    # Enhance image processing
+    if intensity > 0:
+        # Apply unsharp masking for enhanced details
+        gaussian_3 = cv2.GaussianBlur(result, (9, 9), 2.0)
+        unsharp_image = cv2.addWeighted(result, 1.5 + intensity, gaussian_3, -0.5 - intensity, 0)
+        result = unsharp_image
+        
+        # Apply subtle color enhancement
+        lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Enhance luminance
+        l = cv2.createCLAHE(clipLimit=2.0 + intensity, tileGridSize=(8,8)).apply(l)
+        
+        enhanced_lab = cv2.merge([l, a, b])
+        result = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+    
+    return result
+'''
     
     def _extract_code_from_generation(self, generated_text: str, prompt: str) -> str:
         """Extract the generated code from the full generation"""

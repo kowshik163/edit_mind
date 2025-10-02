@@ -44,45 +44,79 @@ class HybridVideoAI(nn.Module):
         # Auto-download models if not available
         self._ensure_models_available()
         
-        # Initialize tokenizer
-        model_name = config['model'].get('backbone', 'microsoft/DialoGPT-small')
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            padding_side="left",
-            cache_dir=config.get('model_cache_dir', 'models/cache')
-        )
+        # Initialize tokenizer - Use teacher model for better capabilities
+        model_name = config.get('teachers', {}).get('text_model', config['model'].get('backbone', 'meta-llama/Llama-2-7b-hf'))
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                padding_side="left",
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load tokenizer for {model_name}, using fallback: {e}")
+            # Fallback to a more compatible model
+            fallback_model = 'microsoft/DialoGPT-small'
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                fallback_model,
+                padding_side="left", 
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
+            model_name = fallback_model
+            
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
-        # Core reasoning backbone (CodeLLaMA/Mixtral)
+        # Core reasoning backbone - Use advanced teacher model
         try:
             self.language_model = LlamaForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=torch.bfloat16,
                 device_map="auto" if torch.cuda.is_available() else None,
-                load_in_8bit=config.get('quantization', {}).get('load_in_8bit', False),
+                load_in_8bit=config.get('quantization', {}).get('load_in_8bit', True),  # Enable 8-bit by default for large models
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
+            logger.info(f"✅ Loaded advanced language model: {model_name}")
         except Exception as e:
-            logger.warning(f"Failed to load LlamaForCausalLM, using AutoModel: {e}")
+            logger.warning(f"Failed to load advanced language model {model_name}, using fallback: {e}")
+            fallback_model = 'microsoft/DialoGPT-small'
             self.language_model = AutoModel.from_pretrained(
-                model_name,
+                fallback_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
         
-        # Vision encoder (CLIP)
-        vision_model = config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32')
-        self.vision_encoder = CLIPVisionModel.from_pretrained(
-            vision_model,
-            cache_dir=config.get('model_cache_dir', 'models/cache')
-        )
+        # Vision encoder - Use SigLIP for better visual understanding
+        vision_model = config.get('teachers', {}).get('vision_encoder', 'google/siglip-large-patch16-384')
+        try:
+            from transformers import SiglipVisionModel
+            self.vision_encoder = SiglipVisionModel.from_pretrained(
+                vision_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
+            logger.info(f"✅ Loaded advanced vision model: {vision_model}")
+        except Exception as e:
+            logger.warning(f"Failed to load SigLIP, using CLIP fallback: {e}")
+            vision_model = config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32')
+            self.vision_encoder = CLIPVisionModel.from_pretrained(
+                vision_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
         
-        # Audio encoder (Whisper)  
-        audio_model = config['model'].get('audio_encoder', 'openai/whisper-tiny')
-        self.audio_encoder = WhisperModel.from_pretrained(
-            audio_model,
-            cache_dir=config.get('model_cache_dir', 'models/cache')
-        )
+        # Audio encoder - Use Whisper Large for better audio understanding
+        audio_model = config.get('teachers', {}).get('audio_models', ['openai/whisper-large-v3'])[0]
+        try:
+            self.audio_encoder = WhisperModel.from_pretrained(
+                audio_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache'),
+                torch_dtype=torch.bfloat16
+            )
+            logger.info(f"✅ Loaded advanced audio model: {audio_model}")
+        except Exception as e:
+            logger.warning(f"Failed to load Whisper Large, using base model: {e}")
+            audio_model = 'openai/whisper-base'
+            self.audio_encoder = WhisperModel.from_pretrained(
+                audio_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
         
         # Initialize model downloader
         self.model_downloader = ModelDownloader(
@@ -300,43 +334,145 @@ class HybridVideoAI(nn.Module):
         return output_path
     
     def _analyze_prompt_for_custom_effects(self, prompt: str) -> List[str]:
-        """Analyze editing prompt to identify requests for custom effects"""
+        """
+        Advanced LLM-powered analysis of editing prompt to identify and extract custom effect requirements.
+        Uses the language model to understand nuanced effect descriptions and generate structured editing plans.
+        """
+        
+        # Enhanced prompt analysis using the language model
+        analysis_prompt = f"""
+        Analyze the following video editing request and extract any custom effects, transitions, or special visual treatments that need to be created:
+
+        USER REQUEST: "{prompt}"
+
+        Instructions:
+        1. Identify any requests for custom visual effects (glitch, distortion, particle systems, etc.)
+        2. Look for unique transitions or motion graphics requests  
+        3. Detect style requests (cyberpunk, vintage, neon, etc.)
+        4. Extract any specific technical requirements (color grading, compositing, etc.)
+        5. Return a structured list of effect descriptions
+
+        Response format:
+        CUSTOM_EFFECTS: [effect1, effect2, effect3]
+        STYLE_REQUESTS: [style1, style2]
+        TECHNICAL_REQUIREMENTS: [req1, req2]
+
+        Analysis:
+        """
+        
+        try:
+            # Tokenize the analysis prompt
+            inputs = self.tokenizer.encode(analysis_prompt, return_tensors='pt', truncation=True, max_length=1024)
+            if torch.cuda.is_available():
+                inputs = inputs.cuda()
+            
+            # Generate LLM analysis with controlled generation
+            with torch.no_grad():
+                if hasattr(self.language_model, 'generate'):
+                    outputs = self.language_model.generate(
+                        inputs,
+                        max_new_tokens=300,
+                        temperature=0.3,  # Low temperature for more focused analysis
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id
+                    )
+                    
+                    # Decode the response
+                    response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                    
+                    # Extract custom effects from structured response
+                    custom_effects = self._parse_llm_analysis(response)
+                    
+                    if custom_effects:
+                        logger.info(f"🧠 LLM identified {len(custom_effects)} custom effects: {custom_effects}")
+                        return custom_effects
+                        
+                else:
+                    logger.warning("Language model doesn't support generation, falling back to heuristic analysis")
+                    
+        except Exception as e:
+            logger.warning(f"LLM analysis failed: {e}, using fallback keyword analysis")
+        
+        # Fallback to enhanced keyword-based analysis if LLM fails
+        return self._fallback_effect_analysis(prompt)
+    
+    def _parse_llm_analysis(self, response: str) -> List[str]:
+        """Parse structured LLM response to extract custom effects"""
+        custom_effects = []
+        
+        try:
+            # Look for CUSTOM_EFFECTS section
+            if "CUSTOM_EFFECTS:" in response:
+                effects_section = response.split("CUSTOM_EFFECTS:")[1].split("STYLE_REQUESTS:")[0]
+                # Extract list items
+                import re
+                effects = re.findall(r'\[([^\]]+)\]', effects_section)
+                if effects:
+                    custom_effects.extend([effect.strip() for effect in effects[0].split(',')])
+            
+            # Look for STYLE_REQUESTS section  
+            if "STYLE_REQUESTS:" in response:
+                style_section = response.split("STYLE_REQUESTS:")[1].split("TECHNICAL_REQUIREMENTS:")[0] if "TECHNICAL_REQUIREMENTS:" in response else response.split("STYLE_REQUESTS:")[1]
+                import re
+                styles = re.findall(r'\[([^\]]+)\]', style_section)
+                if styles:
+                    custom_effects.extend([f"{style.strip()} style effect" for style in styles[0].split(',')])
+                    
+        except Exception as e:
+            logger.warning(f"Failed to parse LLM analysis: {e}")
+            
+        # Clean up effects list
+        custom_effects = [effect.strip().strip('"\'') for effect in custom_effects if effect.strip()]
+        custom_effects = [effect for effect in custom_effects if len(effect) > 3]  # Remove very short effects
+        
+        return custom_effects
+    
+    def _fallback_effect_analysis(self, prompt: str) -> List[str]:
+        """Enhanced fallback analysis using improved keyword detection"""
         
         custom_effect_indicators = [
             "create a", "generate a", "add a custom", "make a unique",
             "apply a special", "create custom", "generate unique",
-            "unusual effect", "special transition", "unique filter"
+            "unusual effect", "special transition", "unique filter",
+            "dynamic effect", "animated", "procedural", "generative"
         ]
         
         custom_effects = []
         prompt_lower = prompt.lower()
         
-        # Look for custom effect requests
+        # Advanced effect keywords with categories
+        effect_categories = {
+            'glitch': ['glitch', 'corruption', 'digital noise', 'pixelation', 'datamosh'],
+            'distortion': ['distortion', 'warp', 'ripple', 'wave', 'bend', 'twist'],
+            'particle': ['particle', 'sparks', 'dust', 'smoke', 'fire', 'energy'],
+            'style': ['cyberpunk', 'vintage', 'retro', 'neon', '80s', 'synthwave', 'vaporwave'],
+            'motion': ['zoom', 'pan', 'tilt', 'rotate', 'shake', 'stabilize'],
+            'color': ['color grade', 'tint', 'saturation', 'contrast', 'brightness'],
+            'composite': ['green screen', 'chroma key', 'masking', 'rotoscope']
+        }
+        
+        # Look for custom effect requests with context
         for indicator in custom_effect_indicators:
             if indicator in prompt_lower:
-                # Extract the effect description
                 start_idx = prompt_lower.find(indicator)
-                # Find the rest of the sentence
                 end_idx = prompt_lower.find('.', start_idx)
                 if end_idx == -1:
                     end_idx = len(prompt)
                 
                 effect_desc = prompt[start_idx:end_idx].strip()
-                if effect_desc and len(effect_desc) > 10:  # Meaningful description
+                if effect_desc and len(effect_desc) > 10:
                     custom_effects.append(effect_desc)
         
-        # Also look for specific effect descriptions
-        effect_keywords = [
-            "glitch", "distortion", "vintage", "cyberpunk", "neon",
-            "particle", "fractal", "kaleidoscope", "mirror", "ripple",
-            "shatter", "explode", "melt", "morph", "warp"
-        ]
+        # Categorized effect detection
+        for category, keywords in effect_categories.items():
+            for keyword in keywords:
+                if keyword in prompt_lower:
+                    effect_name = f"{keyword} effect"
+                    if effect_name not in [e.lower() for e in custom_effects]:
+                        custom_effects.append(effect_name)
         
-        for keyword in effect_keywords:
-            if keyword in prompt_lower and f"{keyword} effect" not in [e.lower() for e in custom_effects]:
-                custom_effects.append(f"{keyword} effect")
-        
-        logger.info(f"Identified {len(custom_effects)} custom effects: {custom_effects}")
+        logger.info(f"📝 Keyword analysis identified {len(custom_effects)} effects: {custom_effects}")
         return custom_effects
         
     def set_training_phase(self, phase: str):

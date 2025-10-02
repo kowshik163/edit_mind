@@ -164,39 +164,313 @@ class VisionProcessor:
             return torch.zeros((len(frames), 512))
     
     def detect_objects(self, frames: List[torch.Tensor]) -> List[Dict]:
-        """Detect objects using basic OpenCV methods (placeholder for RT-DETR)"""
+        """
+        Advanced object detection using RT-DETR/DETR or fallback methods.
+        Provides professional-grade object detection for video understanding.
+        """
         detections = []
+        
+        # Try to use advanced object detection models
+        advanced_detector = self._initialize_advanced_detector()
+        
+        if advanced_detector:
+            logger.info("Using advanced object detection (DETR/RT-DETR)")
+            detections = self._detect_with_advanced_model(frames, advanced_detector)
+        else:
+            logger.info("Using enhanced OpenCV object detection fallback")
+            detections = self._detect_with_enhanced_opencv(frames)
+        
+        return detections
+    
+    def _initialize_advanced_detector(self):
+        """Initialize RT-DETR or DETR for object detection"""
+        
+        try:
+            # Try to load DETR model (available alternative to RT-DETR)
+            from transformers import DetrImageProcessor, DetrForObjectDetection
+            
+            model_name = "facebook/detr-resnet-50"
+            processor = DetrImageProcessor.from_pretrained(model_name)
+            model = DetrForObjectDetection.from_pretrained(model_name)
+            model.to(self.device)
+            model.eval()
+            
+            logger.info("✅ Loaded DETR model for advanced object detection")
+            return {
+                'model': model,
+                'processor': processor,
+                'type': 'detr'
+            }
+            
+        except Exception as e:
+            logger.warning(f"Advanced object detection not available: {e}")
+            
+            # Try RT-DETR if available
+            try:
+                from transformers import RTDetrImageProcessor, RTDetrForObjectDetection
+                
+                model_name = "microsoft/rt-detr-resnet-50"
+                processor = RTDetrImageProcessor.from_pretrained(model_name)
+                model = RTDetrForObjectDetection.from_pretrained(model_name)
+                model.to(self.device)
+                model.eval()
+                
+                logger.info("✅ Loaded RT-DETR model for real-time object detection")
+                return {
+                    'model': model,
+                    'processor': processor,
+                    'type': 'rt_detr'
+                }
+                
+            except Exception as e2:
+                logger.warning(f"RT-DETR also not available: {e2}")
+                return None
+    
+    def _detect_with_advanced_model(self, frames: List[torch.Tensor], detector: Dict) -> List[Dict]:
+        """Perform object detection using advanced models (DETR/RT-DETR)"""
+        
+        detections = []
+        model = detector['model']
+        processor = detector['processor']
         
         for i, frame in enumerate(frames):
             try:
-                # Convert tensor back to numpy array for OpenCV
+                # Convert tensor to PIL Image
                 frame_np = (frame.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                pil_image = Image.fromarray(frame_np)
                 
-                # Basic edge detection as placeholder
-                gray = cv2.cvtColor(frame_np, cv2.COLOR_RGB2GRAY)
-                edges = cv2.Canny(gray, 50, 150)
-                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # Process with advanced detector
+                inputs = processor(images=pil_image, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 
-                frame_detections = []
-                for contour in contours[:10]:  # Limit to top 10 contours
-                    x, y, w, h = cv2.boundingRect(contour)
-                    if w > 20 and h > 20:  # Filter small detections
-                        frame_detections.append({
-                            'bbox': [x, y, x+w, y+h],
-                            'confidence': 0.5,  # Placeholder confidence
-                            'class': 'object'   # Placeholder class
-                        })
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                
+                # Process outputs based on model type
+                if detector['type'] in ['detr', 'rt_detr']:
+                    frame_detections = self._process_detr_outputs(outputs, processor, pil_image.size)
+                else:
+                    frame_detections = []
                 
                 detections.append({
                     'frame_idx': i,
-                    'objects': frame_detections
+                    'objects': frame_detections,
+                    'detection_method': 'advanced_transformer'
                 })
                 
             except Exception as e:
-                logger.warning(f"Error detecting objects in frame {i}: {e}")
-                detections.append({'frame_idx': i, 'objects': []})
+                logger.warning(f"Advanced detection failed for frame {i}: {e}")
+                # Fallback to enhanced OpenCV for this frame
+                fallback_detection = self._detect_single_frame_opencv(frame, i)
+                detections.append(fallback_detection)
         
         return detections
+    
+    def _process_detr_outputs(self, outputs, processor, image_size: Tuple[int, int]) -> List[Dict]:
+        """Process DETR model outputs into standardized detection format"""
+        
+        # Get predictions
+        target_sizes = torch.tensor([image_size[::-1]], device=self.device)  # (height, width)
+        results = processor.post_process_object_detection(outputs, target_sizes=target_sizes)[0]
+        
+        detections = []
+        
+        # Extract high-confidence detections
+        confidence_threshold = 0.7
+        
+        for score, label, box in zip(results['scores'], results['labels'], results['boxes']):
+            if score > confidence_threshold:
+                # Convert box coordinates to standard format
+                x1, y1, x2, y2 = box.tolist()
+                
+                # Get class name (COCO classes)
+                class_id = label.item()
+                class_name = self._get_coco_class_name(class_id)
+                
+                detections.append({
+                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                    'confidence': float(score),
+                    'class': class_name,
+                    'class_id': class_id
+                })
+        
+        return detections
+    
+    def _get_coco_class_name(self, class_id: int) -> str:
+        """Get COCO class name from class ID"""
+        
+        # COCO class names (simplified list)
+        coco_classes = {
+            1: 'person', 2: 'bicycle', 3: 'car', 4: 'motorcycle', 5: 'airplane',
+            6: 'bus', 7: 'train', 8: 'truck', 9: 'boat', 10: 'traffic_light',
+            11: 'fire_hydrant', 13: 'stop_sign', 14: 'parking_meter', 15: 'bench',
+            16: 'bird', 17: 'cat', 18: 'dog', 19: 'horse', 20: 'sheep',
+            21: 'cow', 22: 'elephant', 23: 'bear', 24: 'zebra', 25: 'giraffe',
+            27: 'backpack', 28: 'umbrella', 31: 'handbag', 32: 'tie', 33: 'suitcase',
+            34: 'frisbee', 35: 'skis', 36: 'snowboard', 37: 'sports_ball', 38: 'kite',
+            39: 'baseball_bat', 40: 'baseball_glove', 41: 'skateboard', 42: 'surfboard',
+            43: 'tennis_racket', 44: 'bottle', 46: 'wine_glass', 47: 'cup', 48: 'fork',
+            49: 'knife', 50: 'spoon', 51: 'bowl', 52: 'banana', 53: 'apple',
+            54: 'sandwich', 55: 'orange', 56: 'broccoli', 57: 'carrot', 58: 'hot_dog',
+            59: 'pizza', 60: 'donut', 61: 'cake', 62: 'chair', 63: 'couch',
+            64: 'potted_plant', 65: 'bed', 67: 'dining_table', 70: 'toilet',
+            72: 'tv', 73: 'laptop', 74: 'mouse', 75: 'remote', 76: 'keyboard',
+            77: 'cell_phone', 78: 'microwave', 79: 'oven', 80: 'toaster', 81: 'sink',
+            82: 'refrigerator', 84: 'book', 85: 'clock', 86: 'vase', 87: 'scissors',
+            88: 'teddy_bear', 89: 'hair_drier', 90: 'toothbrush'
+        }
+        
+        return coco_classes.get(class_id, f'unknown_{class_id}')
+    
+    def _detect_with_enhanced_opencv(self, frames: List[torch.Tensor]) -> List[Dict]:
+        """Enhanced OpenCV-based object detection with multiple algorithms"""
+        
+        detections = []
+        
+        for i, frame in enumerate(frames):
+            detection = self._detect_single_frame_opencv(frame, i)
+            detections.append(detection)
+        
+        return detections
+    
+    def _detect_single_frame_opencv(self, frame: torch.Tensor, frame_idx: int) -> Dict:
+        """Advanced OpenCV object detection for single frame"""
+        
+        try:
+            # Convert tensor to numpy array
+            frame_np = (frame.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            
+            frame_detections = []
+            
+            # Method 1: Contour-based detection (enhanced)
+            gray = cv2.cvtColor(frame_np, cv2.COLOR_RGB2GRAY)
+            
+            # Apply multiple preprocessing techniques
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, 50, 150)
+            
+            # Morphological operations to improve contour detection
+            kernel = np.ones((3, 3), np.uint8)
+            edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+            
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Enhanced contour filtering and analysis
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 500:  # Minimum area threshold
+                    x, y, w, h = cv2.boundingRect(contour)
+                    aspect_ratio = w / h if h > 0 else 0
+                    
+                    # Filter based on reasonable aspect ratios and sizes
+                    if 0.2 < aspect_ratio < 5.0 and w > 30 and h > 30:
+                        
+                        # Calculate additional features
+                        hull = cv2.convexHull(contour)
+                        hull_area = cv2.contourArea(hull)
+                        solidity = area / hull_area if hull_area > 0 else 0
+                        
+                        # Estimate object type based on shape characteristics
+                        object_class = self._classify_contour_shape(contour, aspect_ratio, solidity)
+                        
+                        # Confidence based on contour quality
+                        confidence = min(0.9, 0.3 + (solidity * 0.4) + (min(area, 5000) / 5000 * 0.3))
+                        
+                        frame_detections.append({
+                            'bbox': [x, y, x+w, y+h],
+                            'confidence': float(confidence),
+                            'class': object_class,
+                            'area': float(area),
+                            'aspect_ratio': float(aspect_ratio),
+                            'solidity': float(solidity)
+                        })
+            
+            # Method 2: Corner detection for geometric objects
+            corners = cv2.goodFeaturesToTrack(gray, maxCorners=100, qualityLevel=0.01, minDistance=10)
+            if corners is not None:
+                # Group nearby corners into potential objects
+                corner_groups = self._group_corners(corners, distance_threshold=50)
+                
+                for group in corner_groups:
+                    if len(group) >= 4:  # Potential rectangular object
+                        x_coords = [corner[0][0] for corner in group]
+                        y_coords = [corner[0][1] for corner in group]
+                        
+                        x, y = int(min(x_coords)), int(min(y_coords))
+                        w, h = int(max(x_coords) - x), int(max(y_coords) - y)
+                        
+                        if w > 20 and h > 20:
+                            frame_detections.append({
+                                'bbox': [x, y, x+w, y+h],
+                                'confidence': 0.6,
+                                'class': 'geometric_object',
+                                'detection_method': 'corner_based'
+                            })
+            
+            return {
+                'frame_idx': frame_idx,
+                'objects': frame_detections[:15],  # Limit to top 15 detections
+                'detection_method': 'enhanced_opencv'
+            }
+            
+        except Exception as e:
+            logger.warning(f"Enhanced OpenCV detection failed for frame {frame_idx}: {e}")
+            return {'frame_idx': frame_idx, 'objects': [], 'detection_method': 'failed'}
+    
+    def _classify_contour_shape(self, contour, aspect_ratio: float, solidity: float) -> str:
+        """Classify object type based on contour characteristics"""
+        
+        # Calculate additional shape features
+        perimeter = cv2.arcLength(contour, True)
+        area = cv2.contourArea(contour)
+        
+        if area > 0:
+            circularity = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+        else:
+            circularity = 0
+        
+        # Classification based on shape characteristics
+        if circularity > 0.7:
+            return 'circular_object'
+        elif 0.8 < aspect_ratio < 1.2 and solidity > 0.8:
+            return 'square_object'
+        elif aspect_ratio > 2.0 and solidity > 0.7:
+            return 'elongated_object'
+        elif solidity < 0.5:
+            return 'complex_shape'
+        else:
+            return 'general_object'
+    
+    def _group_corners(self, corners, distance_threshold: float = 50) -> List[List]:
+        """Group nearby corners into potential objects"""
+        
+        if corners is None or len(corners) == 0:
+            return []
+        
+        corner_groups = []
+        used_corners = set()
+        
+        for i, corner in enumerate(corners):
+            if i in used_corners:
+                continue
+                
+            current_group = [corner]
+            used_corners.add(i)
+            
+            # Find nearby corners
+            for j, other_corner in enumerate(corners):
+                if j in used_corners:
+                    continue
+                    
+                distance = np.linalg.norm(corner[0] - other_corner[0])
+                if distance < distance_threshold:
+                    current_group.append(other_corner)
+                    used_corners.add(j)
+            
+            if len(current_group) >= 3:  # Minimum corners for meaningful group
+                corner_groups.append(current_group)
+        
+        return corner_groups
     
     def analyze_scene(self, frames: List[torch.Tensor]) -> Dict[str, Any]:
         """Comprehensive scene analysis"""

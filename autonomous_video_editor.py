@@ -23,18 +23,34 @@ from src.training.training_orchestrator import TrainingOrchestrator
 from src.generation.effect_generator import AdvancedEffectGenerator
 from src.inference.autonomous_editor import AutonomousVideoEditor
 
-# Configuration
+# Enhanced Configuration - Now loads from YAML config
+try:
+    from omegaconf import DictConfig, OmegaConf
+    HAS_OMEGACONF = True
+except ImportError:
+    HAS_OMEGACONF = False
+
 DEFAULT_CONFIG = {
     'model': {
-        'backbone': 'microsoft/DialoGPT-small',
-        'vision_encoder': 'openai/clip-vit-base-patch32',
-        'audio_encoder': 'openai/whisper-tiny',
-        'text_dim': 768,
-        'vision_dim': 512,
-        'audio_dim': 512,
-        'fusion_dim': 1024,
-        'hidden_dim': 2048,
-        'num_attention_heads': 8
+        # Use advanced teacher models by default
+        'backbone': 'meta-llama/Llama-2-7b-hf',  # Upgraded from DialoGPT-small
+        'vision_encoder': 'google/siglip-large-patch16-384',  # Upgraded from CLIP
+        'audio_encoder': 'openai/whisper-large-v3',  # Upgraded from whisper-tiny
+        'text_dim': 1024,  # Increased for larger models
+        'vision_dim': 1024,  # Increased for SiGLIP
+        'audio_dim': 1024,  # Increased for Whisper-large
+        'fusion_dim': 2048,  # Increased fusion capacity
+        'hidden_dim': 4096,  # Increased hidden dimensions
+        'num_attention_heads': 16  # More attention heads for better performance
+    },
+    # Add teachers configuration for distillation
+    'teachers': {
+        'text_model': 'meta-llama/Llama-2-7b-hf',  # Use available model instead of Llama-4-70b
+        'vision_encoder': 'google/siglip-large-patch16-384',
+        'audio_models': ['openai/whisper-large-v3'],
+        'object_detection': 'facebook/detr-resnet-50',  # Use DETR as RT-DETR alternative
+        'segmentation': 'facebook/sam-vit-base',  # Use SAM-base as HQ-SAM alternative
+        'code_generation': 'codellama/CodeLlama-7b-Python-hf'
     },
     'training': {
         'auto_setup': True,
@@ -88,15 +104,73 @@ logger = logging.getLogger(__name__)
 class AutonomousVideoEditorApp:
     """Main application class for the autonomous video editor"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize the autonomous video editor application"""
-        self.config = config or DEFAULT_CONFIG
+    def __init__(self, config: Optional[Dict[str, Any]] = None, config_path: Optional[str] = None):
+        """
+        Initialize the autonomous video editor application
+        
+        Args:
+            config: Optional configuration dictionary
+            config_path: Path to YAML configuration file
+        """
+        self.config = self._load_config(config, config_path)
         self.model_downloader = None
         self.dataset_downloader = None
         self.training_orchestrator = None
         self.effect_generator = None
         self.autonomous_editor = None
         self.hybrid_ai = None
+        
+        logger.info("🎬 Autonomous Video Editor Application Initialized")
+        logger.info(f"Using models: Text={self.config.get('teachers', {}).get('text_model', 'default')}")
+        logger.info(f"Vision={self.config.get('teachers', {}).get('vision_encoder', 'default')}")
+        logger.info(f"Audio={self.config.get('teachers', {}).get('audio_models', ['default'])[0]}")
+    
+    def _load_config(self, config: Optional[Dict[str, Any]], config_path: Optional[str]) -> Dict[str, Any]:
+        """Load configuration from YAML file or use provided/default config"""
+        
+        if config is not None:
+            logger.info("Using provided configuration")
+            return config
+        
+        # Try to load from YAML config file
+        yaml_config_path = config_path or 'configs/main_config.yaml'
+        
+        if HAS_OMEGACONF and Path(yaml_config_path).exists():
+            try:
+                logger.info(f"Loading configuration from {yaml_config_path}")
+                yaml_config = OmegaConf.load(yaml_config_path)
+                
+                # Convert to regular dict and merge with defaults
+                yaml_dict = OmegaConf.to_container(yaml_config, resolve=True)
+                
+                # Merge with default config (YAML takes precedence)
+                merged_config = self._deep_merge_config(DEFAULT_CONFIG.copy(), yaml_dict)
+                
+                logger.info("✅ Successfully loaded YAML configuration")
+                return merged_config
+                
+            except Exception as e:
+                logger.warning(f"Failed to load YAML config: {e}, using default")
+                
+        else:
+            if not HAS_OMEGACONF:
+                logger.warning("OmegaConf not available, install with: pip install omegaconf")
+            if not Path(yaml_config_path).exists():
+                logger.warning(f"Config file not found: {yaml_config_path}")
+                
+        logger.info("Using default configuration")
+        return DEFAULT_CONFIG
+    
+    def _deep_merge_config(self, base_config: Dict, yaml_config: Dict) -> Dict:
+        """Deep merge YAML config into base config"""
+        
+        for key, value in yaml_config.items():
+            if key in base_config and isinstance(base_config[key], dict) and isinstance(value, dict):
+                base_config[key] = self._deep_merge_config(base_config[key], value)
+            else:
+                base_config[key] = value
+        
+        return base_config
         
     def setup(self):
         """Setup all components"""
