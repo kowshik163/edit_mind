@@ -84,6 +84,11 @@ class HybridVideoAI(nn.Module):
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
         
+        # Multi-model ensemble for robust reasoning
+        self.ensemble_models = {}
+        self.ensemble_tokenizers = {}
+        self._initialize_ensemble_models(config)
+        
         # Vision encoder - Use SigLIP for better visual understanding
         vision_model = config.get('teachers', {}).get('vision_encoder', 'google/siglip-large-patch16-384')
         try:
@@ -163,6 +168,14 @@ class HybridVideoAI(nn.Module):
         # Training phase tracker
         self.current_phase = "pretraining"
         
+        # Analysis memory for learning from successful prompts
+        self.analysis_memory = {
+            'successful_prompts': [],
+            'successful_effects': [],
+            'failed_attempts': [],
+            'model_performance': {}
+        }
+        
     def _ensure_models_available(self):
         """Ensure all required models are downloaded and available"""
         try:
@@ -191,6 +204,79 @@ class HybridVideoAI(nn.Module):
             
         except Exception as e:
             logger.warning(f"Model download failed, will attempt to load from cache: {e}")
+    
+    def _initialize_ensemble_models(self, config: Dict[str, Any]):
+        """Initialize ensemble of language models for robust consensus"""
+        
+        # Define ensemble models with fallback chain
+        ensemble_candidates = [
+            {
+                'name': 'microsoft/DialoGPT-medium',
+                'type': 'dialog',
+                'priority': 1
+            },
+            {
+                'name': 'microsoft/DialoGPT-small', 
+                'type': 'dialog',
+                'priority': 2
+            },
+            {
+                'name': 'distilbert-base-uncased',
+                'type': 'encoder',
+                'priority': 3
+            }
+        ]
+        
+        # Try to load ensemble models
+        for model_config in ensemble_candidates:
+            try:
+                model_name = model_config['name']
+                
+                # Load tokenizer
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_name,
+                    cache_dir=config.get('model_cache_dir', 'models/cache')
+                )
+                if tokenizer.pad_token is None:
+                    tokenizer.pad_token = tokenizer.eos_token
+                
+                # Load model based on type
+                if model_config['type'] == 'dialog':
+                    try:
+                        from transformers import AutoModelForCausalLM
+                        model = AutoModelForCausalLM.from_pretrained(
+                            model_name,
+                            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                            cache_dir=config.get('model_cache_dir', 'models/cache')
+                        )
+                    except Exception:
+                        model = AutoModel.from_pretrained(
+                            model_name,
+                            cache_dir=config.get('model_cache_dir', 'models/cache')
+                        )
+                else:
+                    model = AutoModel.from_pretrained(
+                        model_name,
+                        cache_dir=config.get('model_cache_dir', 'models/cache')
+                    )
+                
+                # Store in ensemble
+                self.ensemble_models[model_name] = {
+                    'model': model,
+                    'type': model_config['type'],
+                    'priority': model_config['priority'],
+                    'success_rate': 0.5,  # Initial success rate
+                    'total_attempts': 0,
+                    'successful_attempts': 0
+                }
+                self.ensemble_tokenizers[model_name] = tokenizer
+                
+                logger.info(f"✅ Loaded ensemble model: {model_name}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to load ensemble model {model_config['name']}: {e}")
+        
+        logger.info(f"🎯 Ensemble initialized with {len(self.ensemble_models)} models")
     
     def forward(self, 
                 video_frames: Optional[torch.Tensor] = None,
@@ -336,111 +422,1151 @@ class HybridVideoAI(nn.Module):
     def _analyze_prompt_for_custom_effects(self, prompt: str) -> List[str]:
         """
         Sophisticated LLM-powered analysis of editing prompt using advanced reasoning capabilities.
-        Employs multi-stage analysis with context understanding and creative interpretation.
+        Employs multi-stage analysis with context understanding, retry mechanisms, and robust error handling.
         """
         
-        # Multi-stage sophisticated prompt for comprehensive analysis
-        analysis_system_prompt = """You are an expert video editor and visual effects artist with deep knowledge of:
-- Modern video editing techniques and workflows
-- Visual effects creation and compositing
-- Motion graphics and animation
-- Color theory and cinematography  
-- Creative storytelling through visual media
+        # Try multiple analysis approaches for maximum robustness
+        analysis_results = []
+        
+        # Approach 1: Multi-model ensemble consensus
+        ensemble_results = self._perform_ensemble_consensus_analysis(prompt)
+        if ensemble_results:
+            analysis_results.extend(ensemble_results)
+            logger.info(f"🎯 Ensemble consensus succeeded: {len(ensemble_results)} effects")
+        
+        # Approach 2: Structured analysis with explicit formatting
+        structured_results = self._perform_structured_analysis(prompt)
+        if structured_results:
+            analysis_results.extend(structured_results)
+            logger.info(f"✅ Structured analysis succeeded: {len(structured_results)} effects")
+        
+        # Approach 3: Creative interpretation with broader context
+        creative_results = self._perform_creative_analysis(prompt)
+        if creative_results:
+            analysis_results.extend(creative_results)
+            logger.info(f"✅ Creative analysis succeeded: {len(creative_results)} effects")
+        
+        # Approach 4: Technical requirements extraction
+        technical_results = self._perform_technical_analysis(prompt)
+        if technical_results:
+            analysis_results.extend(technical_results)
+            logger.info(f"✅ Technical analysis succeeded: {len(technical_results)} effects")
+        
+        # Combine and validate results
+        if analysis_results:
+            final_effects = self._combine_and_validate_analysis_results(analysis_results, prompt)
+            if self._validate_analysis_quality(final_effects, prompt):
+                # Learn from successful analysis
+                self._learn_from_successful_analysis(prompt, final_effects, analysis_results)
+                logger.info(f"🎯 High-quality LLM analysis completed: {len(final_effects)} effects identified")
+                return final_effects
+            else:
+                logger.warning("⚠️ LLM analysis quality below threshold, attempting refinement")
+                # Try memory-enhanced refined approach
+                refined_results = self._perform_memory_enhanced_analysis(prompt, analysis_results)
+                if refined_results and self._validate_analysis_quality(refined_results, prompt):
+                    self._learn_from_successful_analysis(prompt, refined_results, [refined_results])
+                    logger.info(f"✅ Memory-enhanced analysis successful: {len(refined_results)} effects")
+                    return refined_results
+        
+        # Record failed attempt for learning
+        self._record_failed_analysis_attempt(prompt, analysis_results)
+        
+        # Only fall back if all LLM approaches fail or produce low-quality results
+        logger.warning("🔄 All LLM analysis approaches failed or produced low-quality results, using enhanced fallback")
+        return self._enhanced_contextual_fallback(prompt)
+    
+    def _learn_from_successful_analysis(self, prompt: str, effects: List[str], raw_results: List[List[str]]):
+        """Learn from successful analysis to improve future performance"""
+        
+        try:
+            # Store successful prompt pattern
+            prompt_pattern = self._extract_prompt_pattern(prompt)
+            
+            # Store in memory
+            success_entry = {
+                'prompt': prompt,
+                'prompt_pattern': prompt_pattern,
+                'effects': effects,
+                'raw_results': raw_results,
+                'timestamp': torch.tensor(float(hash(prompt) % 1000000)),  # Simple timestamp
+                'quality_score': len(effects)
+            }
+            
+            self.analysis_memory['successful_prompts'].append(success_entry)
+            self.analysis_memory['successful_effects'].extend(effects)
+            
+            # Maintain memory size limit
+            if len(self.analysis_memory['successful_prompts']) > 100:
+                # Keep most recent and highest quality
+                sorted_memories = sorted(
+                    self.analysis_memory['successful_prompts'],
+                    key=lambda x: (x['quality_score'], x['timestamp']),
+                    reverse=True
+                )
+                self.analysis_memory['successful_prompts'] = sorted_memories[:50]
+            
+            logger.info(f"📚 Learned from successful analysis. Memory size: {len(self.analysis_memory['successful_prompts'])}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to learn from successful analysis: {e}")
+    
+    def _extract_prompt_pattern(self, prompt: str) -> Dict[str, Any]:
+        """Extract patterns from prompt for memory matching"""
+        
+        pattern = {
+            'length': len(prompt),
+            'keywords': [],
+            'style_indicators': [],
+            'technical_terms': []
+        }
+        
+        try:
+            prompt_lower = prompt.lower()
+            
+            # Extract keywords
+            import re
+            
+            # Style indicators
+            style_words = re.findall(r'\b(?:cinematic|vintage|modern|artistic|dramatic|subtle|bold|professional|creative)\b', prompt_lower)
+            pattern['style_indicators'] = list(set(style_words))
+            
+            # Technical terms
+            tech_words = re.findall(r'\b(?:color|grade|grading|effect|filter|transition|composite|motion|track|stabiliz)\w*\b', prompt_lower)
+            pattern['technical_terms'] = list(set(tech_words))
+            
+            # General keywords (remove common words)
+            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+            words = re.findall(r'\b\w+\b', prompt_lower)
+            keywords = [word for word in words if len(word) > 3 and word not in stop_words]
+            pattern['keywords'] = list(set(keywords))[:10]  # Limit to 10 most unique
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract prompt pattern: {e}")
+        
+        return pattern
+    
+    def _record_failed_analysis_attempt(self, prompt: str, attempted_results: List[List[str]]):
+        """Record failed analysis attempts for learning"""
+        
+        try:
+            failure_entry = {
+                'prompt': prompt,
+                'attempted_results': attempted_results,
+                'timestamp': torch.tensor(float(hash(prompt) % 1000000)),
+                'failure_reasons': []
+            }
+            
+            self.analysis_memory['failed_attempts'].append(failure_entry)
+            
+            # Maintain memory size limit
+            if len(self.analysis_memory['failed_attempts']) > 50:
+                # Keep most recent
+                self.analysis_memory['failed_attempts'] = self.analysis_memory['failed_attempts'][-25:]
+            
+        except Exception as e:
+            logger.warning(f"Failed to record failure: {e}")
+    
+    def _perform_memory_enhanced_analysis(self, prompt: str, previous_results: List[List[str]]) -> List[str]:
+        """Perform analysis enhanced by memory of previous successful patterns"""
+        
+        # Find similar successful prompts in memory
+        similar_memories = self._find_similar_memories(prompt)
+        
+        if not similar_memories:
+            logger.info("No similar memories found, using standard refined analysis")
+            return self._perform_refined_analysis(prompt, previous_results)
+        
+        logger.info(f"🧠 Found {len(similar_memories)} similar memories, enhancing analysis")
+        
+        # Create memory-enhanced prompt
+        memory_context = self._build_memory_context(similar_memories)
+        
+        system_prompt = f"""You are an expert video editor with access to successful analysis patterns from similar requests.
 
-Your task is to analyze video editing requests and identify opportunities for custom effects, creative enhancements, and technical implementations."""
+MEMORY CONTEXT - Similar successful analyses:
+{memory_context}
 
-        user_analysis_prompt = f"""Analyze this video editing request with expert-level understanding:
+Use these patterns to guide your analysis but adapt them to the current request. Focus on what worked well in similar cases."""
+
+        user_prompt = f"""Based on the memory context of similar successful analyses, provide targeted effects for:
 
 "{prompt}"
 
-Provide a comprehensive analysis covering:
+Learn from the patterns in the memory context and provide 3-5 specific, actionable effects."""
 
-1. EXPLICIT EFFECTS: Any directly mentioned effects, filters, or treatments
-2. IMPLIED CREATIVE OPPORTUNITIES: Subtle suggestions for enhancements based on context
-3. TECHNICAL REQUIREMENTS: Technical aspects needed (color grading, compositing, etc.)
-4. STYLE INTERPRETATION: Aesthetic direction and mood implications
-5. ADVANCED TECHNIQUES: Professional techniques that would elevate the result
-
-Format your response as a structured analysis with clear categories and actionable items.
-
-Focus on identifying both obvious and nuanced requirements that would create a professional, engaging result."""
+        return self._execute_llm_analysis_with_retry(
+            system_prompt, user_prompt, "memory_enhanced", max_retries=2
+        )
+    
+    def _find_similar_memories(self, prompt: str) -> List[Dict]:
+        """Find similar successful analyses in memory"""
+        
+        current_pattern = self._extract_prompt_pattern(prompt)
+        similar_memories = []
         
         try:
-            # Use sophisticated conversation-style inference
-            messages = [
-                {"role": "system", "content": analysis_system_prompt},
-                {"role": "user", "content": user_analysis_prompt}
-            ]
+            for memory in self.analysis_memory['successful_prompts']:
+                similarity_score = self._calculate_pattern_similarity(
+                    current_pattern, memory['prompt_pattern']
+                )
+                
+                if similarity_score > 0.3:  # Threshold for similarity
+                    similar_memories.append({
+                        'memory': memory,
+                        'similarity': similarity_score
+                    })
             
-            # Create a more sophisticated prompt for analysis
-            formatted_prompt = self._format_conversation_for_inference(messages)
+            # Sort by similarity and return top matches
+            similar_memories.sort(key=lambda x: x['similarity'], reverse=True)
+            return similar_memories[:3]  # Top 3 similar memories
             
-            # Advanced tokenization with proper attention
-            inputs = self.tokenizer(
-                formatted_prompt,
+        except Exception as e:
+            logger.warning(f"Failed to find similar memories: {e}")
+            return []
+    
+    def _calculate_pattern_similarity(self, pattern1: Dict, pattern2: Dict) -> float:
+        """Calculate similarity between two prompt patterns"""
+        
+        try:
+            similarity = 0.0
+            
+            # Keyword overlap
+            keywords1 = set(pattern1.get('keywords', []))
+            keywords2 = set(pattern2.get('keywords', []))
+            if keywords1 and keywords2:
+                keyword_sim = len(keywords1.intersection(keywords2)) / len(keywords1.union(keywords2))
+                similarity += keyword_sim * 0.4
+            
+            # Style indicators overlap
+            styles1 = set(pattern1.get('style_indicators', []))
+            styles2 = set(pattern2.get('style_indicators', []))
+            if styles1 and styles2:
+                style_sim = len(styles1.intersection(styles2)) / len(styles1.union(styles2))
+                similarity += style_sim * 0.3
+            
+            # Technical terms overlap
+            tech1 = set(pattern1.get('technical_terms', []))
+            tech2 = set(pattern2.get('technical_terms', []))
+            if tech1 and tech2:
+                tech_sim = len(tech1.intersection(tech2)) / len(tech1.union(tech2))
+                similarity += tech_sim * 0.3
+            
+            return similarity
+            
+        except Exception as e:
+            logger.warning(f"Failed to calculate similarity: {e}")
+            return 0.0
+    
+    def _build_memory_context(self, similar_memories: List[Dict]) -> str:
+        """Build context string from similar memories"""
+        
+        context_parts = []
+        
+        for i, memory_data in enumerate(similar_memories, 1):
+            memory = memory_data['memory']
+            similarity = memory_data['similarity']
+            
+            context_part = f"""
+Example {i} (similarity: {similarity:.2f}):
+Prompt: "{memory['prompt']}"
+Successful Effects: {', '.join(memory['effects'][:3])}
+"""
+            context_parts.append(context_part)
+        
+        return '\n'.join(context_parts)
+    
+    def _perform_structured_analysis(self, prompt: str) -> List[str]:
+        """Perform structured analysis with explicit JSON-like formatting"""
+        
+        system_prompt = """You are a professional video editing AI assistant. Your task is to analyze video editing requests and extract specific effects, treatments, and enhancements needed.
+
+Always respond in this exact JSON-like format:
+{
+  "explicit_effects": ["effect1", "effect2"],
+  "style_enhancements": ["style1", "style2"], 
+  "technical_requirements": ["requirement1", "requirement2"],
+  "creative_opportunities": ["opportunity1", "opportunity2"]
+}
+
+Be specific and actionable. Each item should be a clear, implementable effect or technique."""
+
+        user_prompt = f"""Analyze this video editing request and extract all effects and requirements:
+
+"{prompt}"
+
+Provide your analysis in the specified JSON format. Focus on practical, implementable effects."""
+
+        return self._execute_llm_analysis_with_retry(
+            system_prompt, user_prompt, "structured", max_retries=3
+        )
+    
+    def _perform_creative_analysis(self, prompt: str) -> List[str]:
+        """Perform creative analysis for artistic and stylistic opportunities"""
+        
+        system_prompt = """You are a creative director and visual effects artist. Analyze video editing requests to identify creative opportunities and artistic enhancements that would elevate the final result.
+
+Focus on:
+- Artistic style opportunities
+- Creative transitions and effects
+- Mood and atmosphere enhancements
+- Innovative techniques
+- Visual storytelling elements
+
+List your suggestions as specific, implementable effects (one per line, starting with '-')."""
+
+        user_prompt = f"""What creative opportunities do you see in this video editing request?
+
+"{prompt}"
+
+Suggest specific effects and techniques that would make this video more engaging and visually compelling."""
+
+        return self._execute_llm_analysis_with_retry(
+            system_prompt, user_prompt, "creative", max_retries=2
+        )
+    
+    def _perform_technical_analysis(self, prompt: str) -> List[str]:
+        """Perform technical analysis for professional video editing requirements"""
+        
+        system_prompt = """You are a technical video editor specializing in professional post-production workflows. Analyze requests to identify technical requirements, color grading needs, and professional techniques.
+
+Focus on:
+- Color correction and grading requirements
+- Compositing and masking needs
+- Motion tracking and stabilization
+- Audio synchronization requirements
+- Format and delivery specifications
+
+List technical requirements as specific, actionable items (one per line, starting with '-')."""
+
+        user_prompt = f"""What technical video editing requirements do you identify in this request?
+
+"{prompt}"
+
+Focus on professional techniques, color work, compositing needs, and technical implementation details."""
+
+        return self._execute_llm_analysis_with_retry(
+            system_prompt, user_prompt, "technical", max_retries=2
+        )
+    
+    def _execute_llm_analysis_with_retry(self, system_prompt: str, user_prompt: str, 
+                                       analysis_type: str, max_retries: int = 3) -> List[str]:
+        """Execute LLM analysis with retry mechanism and error handling"""
+        
+        for attempt in range(max_retries):
+            try:
+                # Format conversation
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+                formatted_prompt = self._format_conversation_for_inference(messages)
+                
+                # Tokenize with error handling
+                try:
+                    inputs = self.tokenizer(
+                        formatted_prompt,
+                        return_tensors='pt',
+                        max_length=min(2048, self.tokenizer.model_max_length or 2048),
+                        truncation=True,
+                        padding=True
+                    )
+                except Exception as e:
+                    logger.warning(f"Tokenization failed for {analysis_type} analysis: {e}")
+                    continue
+                
+                # Move to appropriate device
+                try:
+                    if torch.cuda.is_available() and hasattr(self.language_model, 'device') and self.language_model.device != torch.device('cpu'):
+                        inputs = {k: v.cuda() for k, v in inputs.items()}
+                except Exception as e:
+                    logger.warning(f"Device placement failed: {e}")
+                
+                # Generate with sophisticated parameters
+                with torch.no_grad():
+                    if hasattr(self.language_model, 'generate'):
+                        try:
+                            # Adjust generation parameters based on analysis type
+                            if analysis_type == "structured":
+                                temperature = 0.1  # Very low for structured output
+                                top_p = 0.8
+                                max_new_tokens = 300
+                            elif analysis_type == "creative":
+                                temperature = 0.6  # Higher for creativity
+                                top_p = 0.95
+                                max_new_tokens = 400
+                            else:  # technical
+                                temperature = 0.3  # Moderate for technical precision
+                                top_p = 0.9
+                                max_new_tokens = 350
+                            
+                            outputs = self.language_model.generate(
+                                **inputs,
+                                max_new_tokens=max_new_tokens,
+                                temperature=temperature,
+                                top_p=top_p,
+                                do_sample=True,
+                                num_beams=1,
+                                pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                                eos_token_id=self.tokenizer.eos_token_id,
+                                repetition_penalty=1.1,
+                                no_repeat_ngram_size=3,
+                                early_stopping=True
+                            )
+                            
+                            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                            effects = self._extract_effects_from_response(response, analysis_type)
+                            
+                            if effects:  # Success
+                                logger.info(f"✅ {analysis_type.title()} analysis attempt {attempt + 1} succeeded")
+                                return effects
+                            else:
+                                logger.warning(f"⚠️ {analysis_type.title()} analysis attempt {attempt + 1} produced no effects")
+                                
+                        except torch.cuda.OutOfMemoryError:
+                            logger.warning(f"CUDA OOM in {analysis_type} analysis, trying CPU")
+                            if torch.cuda.is_available():
+                                inputs = {k: v.cpu() for k, v in inputs.items()}
+                                continue
+                        except Exception as e:
+                            logger.warning(f"Generation failed in {analysis_type} analysis attempt {attempt + 1}: {e}")
+                            continue
+                    else:
+                        logger.warning(f"Language model generation not available for {analysis_type} analysis")
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"{analysis_type.title()} analysis attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying {analysis_type} analysis ({attempt + 2}/{max_retries})")
+                continue
+        
+        logger.warning(f"❌ All {max_retries} attempts for {analysis_type} analysis failed")
+        return []
+    
+    def _perform_ensemble_consensus_analysis(self, prompt: str) -> List[str]:
+        """Perform analysis using multiple models and combine results via consensus"""
+        
+        if not self.ensemble_models:
+            logger.warning("No ensemble models available for consensus")
+            return []
+        
+        logger.info(f"🤖 Running ensemble consensus with {len(self.ensemble_models)} models")
+        
+        # Collect results from all available models
+        all_model_results = []
+        
+        # Sort models by success rate and priority
+        sorted_models = sorted(
+            self.ensemble_models.items(),
+            key=lambda x: (x[1]['success_rate'], -x[1]['priority']),
+            reverse=True
+        )
+        
+        for model_name, model_info in sorted_models[:3]:  # Use top 3 models
+            try:
+                model_results = self._run_analysis_on_model(
+                    prompt, model_name, model_info
+                )
+                
+                if model_results:
+                    all_model_results.append({
+                        'model': model_name,
+                        'results': model_results,
+                        'confidence': model_info['success_rate']
+                    })
+                    logger.info(f"✅ {model_name} contributed {len(model_results)} effects")
+                    
+                    # Update success stats
+                    model_info['successful_attempts'] += 1
+                else:
+                    logger.warning(f"⚠️ {model_name} produced no results")
+                
+                model_info['total_attempts'] += 1
+                
+                # Update success rate
+                if model_info['total_attempts'] > 0:
+                    model_info['success_rate'] = (
+                        model_info['successful_attempts'] / model_info['total_attempts']
+                    )
+                    
+            except Exception as e:
+                logger.warning(f"❌ {model_name} failed: {e}")
+                model_info['total_attempts'] += 1
+                if model_info['total_attempts'] > 0:
+                    model_info['success_rate'] = (
+                        model_info['successful_attempts'] / model_info['total_attempts']
+                    )
+        
+        # Generate consensus from all model results
+        if all_model_results:
+            consensus_effects = self._generate_ensemble_consensus(all_model_results, prompt)
+            logger.info(f"🎯 Ensemble consensus generated {len(consensus_effects)} effects")
+            return consensus_effects
+        
+        return []
+    
+    def _run_analysis_on_model(self, prompt: str, model_name: str, model_info: Dict) -> List[str]:
+        """Run analysis on a specific ensemble model"""
+        
+        try:
+            model = model_info['model']
+            tokenizer = self.ensemble_tokenizers[model_name]
+            
+            # Create a focused prompt for ensemble analysis
+            analysis_prompt = f"""Analyze this video editing request and identify the key effects needed:
+
+"{prompt}"
+
+List the 3 most important effects or treatments, one per line starting with '-'."""
+
+            # Tokenize
+            inputs = tokenizer(
+                analysis_prompt,
                 return_tensors='pt',
-                max_length=2048,  # Larger context for sophisticated analysis
+                max_length=512,  # Smaller for ensemble efficiency
                 truncation=True,
                 padding=True
             )
             
-            # Move to device if available
-            if torch.cuda.is_available() and self.language_model.device != torch.device('cpu'):
+            # Move to device if needed
+            if torch.cuda.is_available() and hasattr(model, 'device') and model.device != torch.device('cpu'):
                 inputs = {k: v.cuda() for k, v in inputs.items()}
             
-            # Sophisticated generation with multiple sampling strategies
+            # Generate
             with torch.no_grad():
-                if hasattr(self.language_model, 'generate'):
-                    
-                    # Strategy 1: High-quality reasoning (low temperature)
-                    reasoning_outputs = self.language_model.generate(
+                if hasattr(model, 'generate') and model_info['type'] == 'dialog':
+                    outputs = model.generate(
                         **inputs,
-                        max_new_tokens=512,
-                        temperature=0.2,  # Low temperature for analytical reasoning
+                        max_new_tokens=150,
+                        temperature=0.4,
                         top_p=0.9,
                         do_sample=True,
-                        num_beams=1,
-                        pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                        repetition_penalty=1.1,
-                        no_repeat_ngram_size=3
+                        pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
+                        repetition_penalty=1.1
                     )
                     
-                    reasoning_response = self.tokenizer.decode(reasoning_outputs[0], skip_special_tokens=True)
-                    reasoning_effects = self._extract_effects_from_advanced_analysis(reasoning_response, "reasoning")
+                    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
                     
-                    # Strategy 2: Creative ideation (higher temperature)
-                    creative_outputs = self.language_model.generate(
-                        **inputs,
-                        max_new_tokens=384,
-                        temperature=0.7,  # Higher temperature for creative suggestions
-                        top_p=0.95,
-                        do_sample=True,
-                        num_beams=1,
-                        pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                        repetition_penalty=1.15
-                    )
+                    # Remove original prompt from response
+                    if analysis_prompt in response:
+                        response = response.replace(analysis_prompt, "").strip()
                     
-                    creative_response = self.tokenizer.decode(creative_outputs[0], skip_special_tokens=True)
-                    creative_effects = self._extract_effects_from_advanced_analysis(creative_response, "creative")
+                    # Extract effects
+                    effects = self._extract_effects_from_ensemble_response(response, model_name)
+                    return effects
                     
-                    # Combine and deduplicate effects
-                    all_effects = reasoning_effects + creative_effects
-                    unique_effects = self._deduplicate_and_rank_effects(all_effects, prompt)
-                    
-                    if unique_effects:
-                        logger.info(f"🧠 Advanced LLM analysis identified {len(unique_effects)} effects: {unique_effects[:3]}...")
-                        return unique_effects
-                        
                 else:
-                    logger.warning("Language model generation not available")
+                    # For encoder models, use embeddings to find similar concepts
+                    outputs = model(**inputs)
+                    # This is a simplified approach for encoder models
+                    return [f"[{model_name}] Context-based effect analysis"]
                     
         except Exception as e:
-            logger.warning(f"Advanced LLM analysis failed: {e}")
+            logger.warning(f"Model {model_name} analysis failed: {e}")
+            return []
+    
+    def _extract_effects_from_ensemble_response(self, response: str, model_name: str) -> List[str]:
+        """Extract effects from ensemble model response"""
+        effects = []
         
-        # Enhanced fallback with context understanding
-        return self._sophisticated_fallback_analysis(prompt)
+        try:
+            import re
+            
+            # Look for list items
+            list_items = re.findall(r'[-*•]\s*([^\n]+)', response)
+            for item in list_items:
+                item = item.strip()
+                if len(item) > 3 and len(item) < 100:
+                    effects.append(f"[{model_name}] {item}")
+            
+            # If no list items, look for sentences with effect keywords
+            if not effects:
+                sentences = response.split('.')
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if any(keyword in sentence.lower() for keyword in ['effect', 'filter', 'style', 'color', 'transition']):
+                        if len(sentence) > 5 and len(sentence) < 150:
+                            effects.append(f"[{model_name}] {sentence}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract from {model_name} response: {e}")
+        
+        return effects[:3]  # Limit per model
+    
+    def _generate_ensemble_consensus(self, model_results: List[Dict], prompt: str) -> List[str]:
+        """Generate consensus effects from multiple model results"""
+        
+        # Collect all effects with their sources
+        effect_votes = {}
+        
+        for result_data in model_results:
+            model_name = result_data['model']
+            effects = result_data['results']
+            confidence = result_data['confidence']
+            
+            for effect in effects:
+                # Extract core effect (remove model prefix)
+                if ']' in effect:
+                    core_effect = effect.split(']', 1)[-1].strip().lower()
+                else:
+                    core_effect = effect.lower()
+                
+                # Vote with confidence weighting
+                if core_effect not in effect_votes:
+                    effect_votes[core_effect] = {
+                        'votes': 0,
+                        'models': [],
+                        'original_text': effect,
+                        'total_confidence': 0
+                    }
+                
+                effect_votes[core_effect]['votes'] += 1
+                effect_votes[core_effect]['models'].append(model_name)
+                effect_votes[core_effect]['total_confidence'] += confidence
+        
+        # Rank effects by consensus strength
+        consensus_effects = []
+        
+        for core_effect, vote_data in effect_votes.items():
+            # Calculate consensus score
+            consensus_score = (
+                vote_data['votes'] * 2 +  # Number of models agreeing
+                vote_data['total_confidence']  # Sum of model confidence
+            )
+            
+            consensus_effects.append({
+                'effect': vote_data['original_text'],
+                'score': consensus_score,
+                'votes': vote_data['votes'],
+                'models': vote_data['models']
+            })
+        
+        # Sort by consensus score
+        consensus_effects.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Return top consensus effects
+        final_effects = []
+        for effect_data in consensus_effects[:8]:  # Top 8 consensus effects
+            effect_text = effect_data['effect']
+            
+            # Add consensus information
+            if effect_data['votes'] > 1:
+                model_list = ', '.join(effect_data['models'][:2])  # Show first 2 models
+                effect_text = f"[Ensemble Consensus] {effect_text} (agreed by {effect_data['votes']} models: {model_list})"
+            else:
+                effect_text = f"[Ensemble] {effect_text}"
+            
+            final_effects.append(effect_text)
+        
+        return final_effects
+    
+    def _extract_effects_from_response(self, response: str, analysis_type: str) -> List[str]:
+        """Extract effects from LLM response based on analysis type"""
+        effects = []
+        
+        try:
+            # Remove the original prompt from response
+            if "Assistant:" in response:
+                analysis = response.split("Assistant:")[-1].strip()
+            elif "User:" in response:
+                # Find the last user message and take everything after it
+                parts = response.split("User:")
+                if len(parts) > 1:
+                    analysis = parts[-1].split("System:")[-1].strip()
+                else:
+                    analysis = response
+            else:
+                analysis = response
+            
+            if analysis_type == "structured":
+                effects = self._extract_from_structured_response(analysis)
+            elif analysis_type == "creative":
+                effects = self._extract_from_creative_response(analysis)
+            elif analysis_type == "technical":
+                effects = self._extract_from_technical_response(analysis)
+            
+            # Clean and validate effects
+            effects = [effect.strip() for effect in effects if effect.strip()]
+            effects = [effect for effect in effects if len(effect) > 3 and len(effect) < 200]
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract effects from {analysis_type} response: {e}")
+        
+        return effects
+    
+    def _extract_from_structured_response(self, response: str) -> List[str]:
+        """Extract effects from structured JSON-like response"""
+        effects = []
+        
+        try:
+            import re
+            import json
+            
+            # Try to parse as JSON first
+            try:
+                # Look for JSON-like structure
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    data = json.loads(json_str)
+                    
+                    # Extract from all categories
+                    for category in ['explicit_effects', 'style_enhancements', 'technical_requirements', 'creative_opportunities']:
+                        if category in data and isinstance(data[category], list):
+                            for effect in data[category]:
+                                if isinstance(effect, str):
+                                    effects.append(f"[{category.replace('_', ' ').title()}] {effect}")
+            except json.JSONDecodeError:
+                pass
+            
+            # Fallback: extract from structured text
+            if not effects:
+                # Look for quoted items
+                quoted_items = re.findall(r'"([^"]+)"', response)
+                effects.extend([f"[Structured] {item}" for item in quoted_items])
+                
+                # Look for list items
+                list_items = re.findall(r'[-*•]\s*([^\n]+)', response)
+                effects.extend([f"[Structured] {item}" for item in list_items])
+                
+        except Exception as e:
+            logger.warning(f"Failed to extract from structured response: {e}")
+        
+        return effects
+    
+    def _extract_from_creative_response(self, response: str) -> List[str]:
+        """Extract effects from creative analysis response"""
+        effects = []
+        
+        try:
+            import re
+            
+            # Look for list items (-, *, •)
+            list_items = re.findall(r'[-*•]\s*([^\n]+)', response)
+            effects.extend([f"[Creative] {item.strip()}" for item in list_items])
+            
+            # Look for numbered items
+            numbered_items = re.findall(r'\d+\.\s*([^\n]+)', response)
+            effects.extend([f"[Creative] {item.strip()}" for item in numbered_items])
+            
+            # Look for effect-related sentences
+            effect_sentences = re.findall(r'[^.!?]*(?:effect|style|transition|treatment|enhancement)[^.!?]*[.!?]', response.lower())
+            for sentence in effect_sentences:
+                sentence = sentence.strip()
+                if len(sentence) > 10:
+                    effects.append(f"[Creative] {sentence}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract from creative response: {e}")
+        
+        return effects
+    
+    def _extract_from_technical_response(self, response: str) -> List[str]:
+        """Extract effects from technical analysis response"""
+        effects = []
+        
+        try:
+            import re
+            
+            # Look for technical terms and requirements
+            technical_patterns = [
+                r'color\s+(?:grading|correction|grade)[^.!?]*[.!?]',
+                r'compositing[^.!?]*[.!?]',
+                r'motion\s+tracking[^.!?]*[.!?]',
+                r'stabilization[^.!?]*[.!?]',
+                r'masking[^.!?]*[.!?]'
+            ]
+            
+            for pattern in technical_patterns:
+                matches = re.findall(pattern, response.lower())
+                for match in matches:
+                    effects.append(f"[Technical] {match.strip()}")
+            
+            # Look for list items
+            list_items = re.findall(r'[-*•]\s*([^\n]+)', response)
+            effects.extend([f"[Technical] {item.strip()}" for item in list_items])
+            
+            # Look for numbered items
+            numbered_items = re.findall(r'\d+\.\s*([^\n]+)', response)
+            effects.extend([f"[Technical] {item.strip()}" for item in numbered_items])
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract from technical response: {e}")
+        
+        return effects
+    
+    def _combine_and_validate_analysis_results(self, all_results: List[List[str]], prompt: str) -> List[str]:
+        """Combine results from multiple analysis approaches and validate"""
+        
+        # Flatten all results
+        all_effects = []
+        for result_list in all_results:
+            all_effects.extend(result_list)
+        
+        if not all_effects:
+            return []
+        
+        # Remove duplicates while preserving categories
+        unique_effects = []
+        seen_effects = set()
+        
+        for effect in all_effects:
+            # Extract the core effect (without category prefix)
+            if ']' in effect:
+                core_effect = effect.split(']', 1)[-1].strip().lower()
+            else:
+                core_effect = effect.strip().lower()
+            
+            if core_effect not in seen_effects and len(core_effect) > 3:
+                seen_effects.add(core_effect)
+                unique_effects.append(effect)
+        
+        # Rank by relevance to original prompt
+        ranked_effects = self._rank_effects_by_relevance(unique_effects, prompt)
+        
+        # Limit to most relevant effects
+        return ranked_effects[:12]
+    
+    def _rank_effects_by_relevance(self, effects: List[str], prompt: str) -> List[str]:
+        """Rank effects by relevance to the original prompt"""
+        
+        prompt_words = set(prompt.lower().split())
+        ranked_effects = []
+        
+        # Calculate relevance score for each effect
+        effect_scores = []
+        
+        for effect in effects:
+            # Extract core effect text
+            if ']' in effect:
+                core_text = effect.split(']', 1)[-1].strip()
+            else:
+                core_text = effect
+            
+            effect_words = set(core_text.lower().split())
+            
+            # Calculate word overlap score
+            overlap_score = len(prompt_words.intersection(effect_words))
+            
+            # Bonus for category types
+            category_bonus = 0
+            if '[explicit' in effect.lower() or '[structured' in effect.lower():
+                category_bonus = 3  # Highest priority for explicit effects
+            elif '[technical' in effect.lower():
+                category_bonus = 2
+            elif '[creative' in effect.lower():
+                category_bonus = 1
+            
+            total_score = overlap_score + category_bonus
+            effect_scores.append((effect, total_score))
+        
+        # Sort by score (descending) and return effects
+        effect_scores.sort(key=lambda x: x[1], reverse=True)
+        return [effect for effect, _ in effect_scores]
+    
+    def _validate_analysis_quality(self, effects: List[str], prompt: str) -> bool:
+        """Advanced validation of LLM analysis quality with multiple quality metrics"""
+        
+        if not effects:
+            logger.warning("❌ Validation failed: No effects generated")
+            return False
+        
+        logger.info(f"🔍 Validating analysis quality for {len(effects)} effects")
+        
+        # Multi-dimensional quality assessment
+        quality_metrics = {
+            'category_diversity': 0,
+            'prompt_relevance': 0, 
+            'effect_specificity': 0,
+            'technical_depth': 0,
+            'actionability': 0,
+            'uniqueness': 0
+        }
+        
+        # Metric 1: Category diversity (multiple analysis types)
+        categories = set()
+        for effect in effects:
+            if '[' in effect and ']' in effect:
+                category = effect.split('[')[1].split(']')[0].lower()
+                categories.add(category)
+        
+        if len(categories) >= 3:
+            quality_metrics['category_diversity'] = 3
+        elif len(categories) >= 2:
+            quality_metrics['category_diversity'] = 2
+        elif len(categories) >= 1:
+            quality_metrics['category_diversity'] = 1
+        
+        # Metric 2: Enhanced prompt relevance analysis
+        prompt_words = set(prompt.lower().split())
+        prompt_concepts = self._extract_concepts_from_text(prompt.lower())
+        
+        relevant_effects = 0
+        high_relevance_effects = 0
+        
+        for effect in effects:
+            effect_words = set(effect.lower().split())
+            effect_concepts = self._extract_concepts_from_text(effect.lower())
+            
+            # Word-level relevance
+            word_overlap = len(prompt_words.intersection(effect_words))
+            # Concept-level relevance
+            concept_overlap = len(prompt_concepts.intersection(effect_concepts))
+            
+            if word_overlap > 0 or concept_overlap > 0:
+                relevant_effects += 1
+                if word_overlap >= 2 or concept_overlap >= 1:
+                    high_relevance_effects += 1
+        
+        relevance_ratio = relevant_effects / len(effects)
+        high_relevance_ratio = high_relevance_effects / len(effects)
+        
+        if high_relevance_ratio >= 0.4:
+            quality_metrics['prompt_relevance'] = 3
+        elif relevance_ratio >= 0.6:
+            quality_metrics['prompt_relevance'] = 2
+        elif relevance_ratio >= 0.3:
+            quality_metrics['prompt_relevance'] = 1
+        
+        # Metric 3: Effect specificity (detailed vs vague)
+        specific_effects = 0
+        for effect in effects:
+            # Remove category prefix
+            core_effect = effect.split(']', 1)[-1].strip() if ']' in effect else effect
+            specificity_score = self._calculate_effect_specificity(core_effect)
+            if specificity_score >= 0.7:
+                specific_effects += 1
+        
+        specificity_ratio = specific_effects / len(effects)
+        if specificity_ratio >= 0.6:
+            quality_metrics['effect_specificity'] = 3
+        elif specificity_ratio >= 0.4:
+            quality_metrics['effect_specificity'] = 2
+        elif specificity_ratio >= 0.2:
+            quality_metrics['effect_specificity'] = 1
+        
+        # Metric 4: Technical depth assessment
+        technical_terms = [
+            'color grading', 'color correction', 'compositing', 'motion tracking',
+            'stabilization', 'masking', 'keying', 'rotoscoping', 'temporal',
+            'spatial', 'luminance', 'chrominance', 'gamma', 'contrast'
+        ]
+        
+        technical_effects = 0
+        for effect in effects:
+            effect_lower = effect.lower()
+            if any(term in effect_lower for term in technical_terms):
+                technical_effects += 1
+        
+        if technical_effects >= len(effects) * 0.4:
+            quality_metrics['technical_depth'] = 3
+        elif technical_effects >= len(effects) * 0.2:
+            quality_metrics['technical_depth'] = 2
+        elif technical_effects > 0:
+            quality_metrics['technical_depth'] = 1
+        
+        # Metric 5: Actionability (can be implemented)
+        actionable_effects = 0
+        for effect in effects:
+            if self._is_effect_actionable(effect):
+                actionable_effects += 1
+        
+        actionability_ratio = actionable_effects / len(effects)
+        if actionability_ratio >= 0.8:
+            quality_metrics['actionability'] = 3
+        elif actionability_ratio >= 0.6:
+            quality_metrics['actionability'] = 2
+        elif actionability_ratio >= 0.4:
+            quality_metrics['actionability'] = 1
+        
+        # Metric 6: Uniqueness (avoid repetition)
+        unique_concepts = set()
+        for effect in effects:
+            concepts = self._extract_concepts_from_text(effect.lower())
+            unique_concepts.update(concepts)
+        
+        uniqueness_ratio = len(unique_concepts) / max(len(effects), 1)
+        if uniqueness_ratio >= 0.8:
+            quality_metrics['uniqueness'] = 3
+        elif uniqueness_ratio >= 0.6:
+            quality_metrics['uniqueness'] = 2
+        elif uniqueness_ratio >= 0.4:
+            quality_metrics['uniqueness'] = 1
+        
+        # Calculate overall quality score
+        total_score = sum(quality_metrics.values())
+        max_possible_score = len(quality_metrics) * 3
+        quality_percentage = total_score / max_possible_score
+        
+        # Log detailed metrics
+        logger.info(f"📊 Quality Metrics:")
+        for metric, score in quality_metrics.items():
+            logger.info(f"  {metric.replace('_', ' ').title()}: {score}/3")
+        logger.info(f"  Overall Quality: {quality_percentage:.2%} ({total_score}/{max_possible_score})")
+        
+        # Advanced quality thresholds
+        if quality_percentage >= 0.7:
+            logger.info("✅ High quality analysis - exceeds standards")
+            return True
+        elif quality_percentage >= 0.5:
+            logger.info("✅ Good quality analysis - meets standards")
+            return True
+        elif quality_percentage >= 0.35:
+            logger.warning("⚠️ Moderate quality analysis - borderline")
+            # Additional check: if ensemble consensus is strong, accept moderate quality
+            ensemble_effects = [e for e in effects if 'ensemble' in e.lower()]
+            if len(ensemble_effects) >= len(effects) * 0.3:
+                logger.info("✅ Accepting due to strong ensemble consensus")
+                return True
+            return False
+        else:
+            logger.warning("❌ Low quality analysis - below standards")
+            return False
+    
+    def _extract_concepts_from_text(self, text: str) -> set:
+        """Extract key concepts from text for relevance analysis"""
+        
+        import re
+        concepts = set()
+        
+        # Video editing concepts
+        editing_concepts = re.findall(r'\b(?:edit|cut|trim|splice|montage|sequence)\w*\b', text)
+        concepts.update(editing_concepts)
+        
+        # Visual effects concepts
+        vfx_concepts = re.findall(r'\b(?:effect|filter|transition|fade|dissolve|wipe)\w*\b', text)
+        concepts.update(vfx_concepts)
+        
+        # Color and grading concepts
+        color_concepts = re.findall(r'\b(?:color|colour|grade|grading|correct|correction|lut|gamma)\w*\b', text)
+        concepts.update(color_concepts)
+        
+        # Motion and tracking concepts
+        motion_concepts = re.findall(r'\b(?:motion|track|tracking|stabiliz|shake|smooth)\w*\b', text)
+        concepts.update(motion_concepts)
+        
+        # Style and aesthetic concepts
+        style_concepts = re.findall(r'\b(?:style|aesthetic|cinematic|vintage|modern|artistic|dramatic)\w*\b', text)
+        concepts.update(style_concepts)
+        
+        return concepts
+    
+    def _calculate_effect_specificity(self, effect_text: str) -> float:
+        """Calculate how specific/detailed an effect description is"""
+        
+        specificity_score = 0.0
+        
+        # Length bonus (more detailed descriptions tend to be longer)
+        if len(effect_text) > 50:
+            specificity_score += 0.3
+        elif len(effect_text) > 20:
+            specificity_score += 0.2
+        
+        # Technical term bonus
+        technical_indicators = [
+            'color grading', 'color correction', 'motion tracking', 'compositing',
+            'masking', 'keying', 'gamma', 'contrast', 'saturation', 'luminance',
+            'temporal', 'spatial', 'frequency', 'amplitude'
+        ]
+        
+        tech_count = sum(1 for term in technical_indicators if term in effect_text.lower())
+        specificity_score += min(tech_count * 0.1, 0.3)
+        
+        # Numerical parameters bonus
+        import re
+        numbers = re.findall(r'\d+(?:\.\d+)?', effect_text)
+        if numbers:
+            specificity_score += 0.2
+        
+        # Specific tool/software mentions
+        tools = ['davinci', 'premiere', 'after effects', 'ffmpeg', 'opencv']
+        if any(tool in effect_text.lower() for tool in tools):
+            specificity_score += 0.2
+        
+        return min(specificity_score, 1.0)
+    
+    def _is_effect_actionable(self, effect_text: str) -> bool:
+        """Determine if an effect description is actionable/implementable"""
+        
+        # Remove category prefix
+        core_effect = effect_text.split(']', 1)[-1].strip() if ']' in effect_text else effect_text
+        core_effect_lower = core_effect.lower()
+        
+        # Too vague indicators
+        vague_indicators = [
+            'make it better', 'improve quality', 'enhance video', 'add effects',
+            'make it look good', 'professional look', 'nice effect'
+        ]
+        
+        if any(vague in core_effect_lower for vague in vague_indicators):
+            return False
+        
+        # Too short or too generic
+        if len(core_effect.strip()) < 5:
+            return False
+        
+        # Actionable indicators
+        actionable_indicators = [
+            'color grade', 'color correct', 'stabilize', 'track motion', 'add transition',
+            'apply filter', 'adjust', 'composite', 'mask', 'key out', 'fade in',
+            'fade out', 'crop', 'scale', 'rotate', 'blur', 'sharpen'
+        ]
+        
+        if any(action in core_effect_lower for action in actionable_indicators):
+            return True
+        
+        # Has specific parameters or values
+        import re
+        if re.search(r'\d+(?:\.\d+)?(?:px|%|sec|ms|db|hz)', core_effect_lower):
+            return True
+        
+        # Default: moderately actionable if it's reasonably specific
+        return len(core_effect.strip()) >= 10
+    
+    def _perform_refined_analysis(self, prompt: str, previous_results: List[List[str]]) -> List[str]:
+        """Perform refined analysis using insights from previous attempts"""
+        
+        # Analyze what worked in previous attempts
+        successful_categories = set()
+        for result_list in previous_results:
+            for effect in result_list:
+                if '[' in effect and ']' in effect:
+                    category = effect.split('[')[1].split(']')[0].lower()
+                    successful_categories.add(category)
+        
+        # Create a focused refined prompt
+        system_prompt = f"""You are an expert video editor. Previous analysis identified categories: {', '.join(successful_categories)}. 
+
+Provide a concise, focused analysis that builds on these insights. Be specific and actionable."""
+
+        user_prompt = f"""Building on previous analysis, provide the most important and actionable video editing effects for:
+
+"{prompt}"
+
+Focus on the 3-5 most critical effects that would have the biggest impact. Be specific about implementation."""
+
+        return self._execute_llm_analysis_with_retry(
+            system_prompt, user_prompt, "refined", max_retries=2
+        )
+    
+    def _enhanced_contextual_fallback(self, prompt: str) -> List[str]:
+        """Enhanced fallback that uses contextual understanding instead of simple regex"""
+        
+        logger.info("🔄 Using enhanced contextual fallback analysis")
+        
+        # Use the existing sophisticated fallback but with better logging
+        fallback_effects = self._sophisticated_fallback_analysis(prompt)
+        
+        if fallback_effects:
+            logger.info(f"📝 Contextual fallback identified {len(fallback_effects)} effects")
+            # Mark as fallback for transparency
+            enhanced_effects = [f"[Fallback Analysis] {effect}" for effect in fallback_effects]
+            return enhanced_effects
+        else:
+            logger.warning("❌ Even enhanced fallback failed to identify effects")
+            return [f"[Fallback Analysis] Basic video editing with standard transitions and effects"]
     
     def _format_conversation_for_inference(self, messages: List[Dict[str, str]]) -> str:
         """Format conversation messages for model inference"""

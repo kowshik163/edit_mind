@@ -68,7 +68,7 @@ class KnowledgeDistiller:
         # Initialize RT-DETR for object detection
         try:
             self.rt_detr = self._load_rt_detr()
-            logger.info("✅ RT-DETR loaded for object detection")
+            self._validate_model_authenticity('RT-DETR', self.rt_detr)
         except Exception as e:
             logger.warning(f"RT-DETR not available: {e}")
             self.rt_detr = None
@@ -76,7 +76,7 @@ class KnowledgeDistiller:
         # Initialize HQ-SAM for segmentation
         try:
             self.hq_sam = self._load_hq_sam()
-            logger.info("✅ HQ-SAM loaded for segmentation")
+            self._validate_model_authenticity('HQ-SAM', self.hq_sam)
         except Exception as e:
             logger.warning(f"HQ-SAM not available: {e}")
             self.hq_sam = None
@@ -84,7 +84,7 @@ class KnowledgeDistiller:
         # Initialize BeatNet for music analysis
         try:
             self.beatnet = self._load_beatnet()
-            logger.info("✅ BeatNet loaded for music analysis")
+            self._validate_model_authenticity('BeatNet', self.beatnet)
         except Exception as e:
             logger.warning(f"BeatNet not available: {e}")
             self.beatnet = None
@@ -92,10 +92,109 @@ class KnowledgeDistiller:
         # Initialize Demucs for audio separation
         try:
             self.demucs = self._load_demucs()
-            logger.info("✅ Demucs loaded for audio separation")
+            self._validate_model_authenticity('Demucs', self.demucs)
         except Exception as e:
             logger.warning(f"Demucs not available: {e}")
             self.demucs = None
+        
+        # Log final model status
+        self._log_model_status()
+    
+    def _validate_model_authenticity(self, model_name: str, model_info: Dict):
+        """Validate and log the authenticity of loaded models"""
+        if model_info is None:
+            logger.error(f"❌ {model_name}: Failed to load")
+            return
+        
+        model_type = model_info.get('type', 'unknown')
+        model_path = model_info.get('model_name', 'unknown')
+        
+        # Check if using real pre-trained models vs fallbacks
+        if 'fallback' in model_type.lower():
+            logger.warning(f"⚠️  {model_name}: Using FALLBACK implementation ({model_path})")
+            logger.warning(f"   Consider installing proper {model_name} packages for full functionality")
+        elif 'real' in model_type.lower() or 'teacher' in model_type.lower():
+            logger.info(f"✅ {model_name}: Using AUTHENTIC pre-trained model ({model_path})")
+        elif any(indicator in model_path.lower() for indicator in ['facebook', 'microsoft', 'openai', 'lyuwenyu']):
+            logger.info(f"✅ {model_name}: Using official pre-trained model ({model_path})")
+        else:
+            logger.warning(f"🔍 {model_name}: Using alternative implementation ({model_path})")
+    
+    def _log_model_status(self):
+        """Log overall model loading status"""
+        
+        models_status = {
+            'RT-DETR (Object Detection)': self.rt_detr,
+            'HQ-SAM (Segmentation)': self.hq_sam,
+            'BeatNet (Music Analysis)': self.beatnet,
+            'Demucs (Audio Separation)': self.demucs
+        }
+        
+        authentic_count = 0
+        fallback_count = 0
+        failed_count = 0
+        
+        logger.info("🏗️  Advanced Teacher Models Status:")
+        
+        for model_name, model_info in models_status.items():
+            if model_info is None:
+                logger.info(f"   ❌ {model_name}: NOT LOADED")
+                failed_count += 1
+            else:
+                model_type = model_info.get('type', '')
+                if 'fallback' in model_type.lower():
+                    logger.info(f"   ⚠️  {model_name}: FALLBACK")
+                    fallback_count += 1
+                else:
+                    logger.info(f"   ✅ {model_name}: AUTHENTIC")
+                    authentic_count += 1
+        
+        total_models = len(models_status)
+        success_rate = (authentic_count + fallback_count) / total_models * 100
+        
+        logger.info(f"📊 Model Loading Summary:")
+        logger.info(f"   Authentic Models: {authentic_count}/{total_models}")
+        logger.info(f"   Fallback Models: {fallback_count}/{total_models}")
+        logger.info(f"   Failed Models: {failed_count}/{total_models}")
+        logger.info(f"   Success Rate: {success_rate:.1f}%")
+        
+        if authentic_count == total_models:
+            logger.info("🎯 Perfect! All authentic teacher models loaded successfully")
+        elif authentic_count > fallback_count:
+            logger.info("👍 Good! Majority of authentic models loaded")
+        elif fallback_count > 0:
+            logger.warning("⚠️  Warning! Using fallback implementations - consider installing proper packages")
+        else:
+            logger.error("❌ Critical! No teacher models loaded successfully")
+        
+        # Provide installation guidance if needed
+        if fallback_count > 0 or failed_count > 0:
+            self._provide_installation_guidance()
+    
+    def _provide_installation_guidance(self):
+        """Provide guidance for installing authentic models"""
+        
+        logger.info("📋 Installation Guidance for Authentic Models:")
+        
+        if self.rt_detr is None or 'fallback' in self.rt_detr.get('type', '').lower():
+            logger.info("   RT-DETR:")
+            logger.info("     pip install transformers")
+            logger.info("     # Models will be downloaded automatically from Hugging Face")
+        
+        if self.hq_sam is None or 'fallback' in self.hq_sam.get('type', '').lower():
+            logger.info("   HQ-SAM:")
+            logger.info("     pip install transformers") 
+            logger.info("     # SAM models will be downloaded from Hugging Face Hub")
+        
+        if self.beatnet is None or 'fallback' in self.beatnet.get('type', '').lower():
+            logger.info("   BeatNet:")
+            logger.info("     pip install BeatNet")
+            logger.info("     # Official BeatNet package for advanced music analysis")
+        
+        if self.demucs is None or 'fallback' in self.demucs.get('type', '').lower():
+            logger.info("   Demucs:")
+            logger.info("     pip install demucs")
+            logger.info("     # Official Demucs for professional audio separation")
     
     def _load_rt_detr(self):
         """
@@ -117,6 +216,23 @@ class KnowledgeDistiller:
                 'processor_class': 'RTDetrImageProcessor',
                 'model_class': 'RTDetrForObjectDetection'
             })
+        
+        # Add config-specified teacher model
+        teachers_config = self.config.get('teachers', {})
+        if teachers_config.get('object_detection'):
+            # Parse teacher model specification like "RT-DETR/rtdetr-resnet50"
+            teacher_model = teachers_config['object_detection']
+            if '/' in teacher_model:
+                org, model = teacher_model.split('/', 1)
+                if org.upper() == 'RT-DETR':
+                    # Convert to Hugging Face format
+                    hf_model_name = f"PekingU/{model}" if not model.startswith('PekingU/') else model
+                    model_candidates.insert(0, {  # Insert at front for priority
+                        'name': hf_model_name,
+                        'type': 'teacher_rt_detr',
+                        'processor_class': 'RTDetrImageProcessor',
+                        'model_class': 'RTDetrForObjectDetection'
+                    })
         
         # Add standard RT-DETR options
         model_candidates.extend([
@@ -193,8 +309,57 @@ class KnowledgeDistiller:
                 logger.warning(f"Failed to load {candidate['name']}: {e}")
                 continue
         
-        # Ultimate fallback to RetinaNet
-        logger.warning("All transformer-based object detection models failed, using RetinaNet fallback")
+        # Before falling back, try alternative RT-DETR sources
+        logger.warning("Standard RT-DETR models failed, trying alternative sources...")
+        
+        # Try alternative model sources
+        alternative_candidates = [
+            {
+                'name': 'lyuwenyu/rt-detr-l',
+                'type': 'alternative_rt_detr',
+                'processor_class': 'RTDetrImageProcessor',
+                'model_class': 'RTDetrForObjectDetection'
+            },
+            {
+                'name': 'lyuwenyu/rt-detr-r50vd',
+                'type': 'alternative_rt_detr',
+                'processor_class': 'RTDetrImageProcessor', 
+                'model_class': 'RTDetrForObjectDetection'
+            }
+        ]
+        
+        for alt_candidate in alternative_candidates:
+            try:
+                logger.info(f"🔄 Trying alternative RT-DETR: {alt_candidate['name']}")
+                
+                from transformers import RTDetrImageProcessor, RTDetrForObjectDetection
+                
+                processor = RTDetrImageProcessor.from_pretrained(alt_candidate['name'])
+                model = RTDetrForObjectDetection.from_pretrained(alt_candidate['name'])
+                model.eval()
+                model.to(self.device)
+                
+                logger.info(f"✅ Successfully loaded alternative RT-DETR: {alt_candidate['name']}")
+                
+                return {
+                    'model': model,
+                    'processor': processor,
+                    'type': alt_candidate['type'],
+                    'model_name': alt_candidate['name'],
+                    'capabilities': {
+                        'real_time': True,
+                        'accuracy': 'high',
+                        'speed': 'fast',
+                        'source': 'alternative'
+                    }
+                }
+                
+            except Exception as e:
+                logger.warning(f"Alternative RT-DETR {alt_candidate['name']} failed: {e}")
+                continue
+        
+        # Ultimate fallback to RetinaNet only after exhausting all RT-DETR options
+        logger.warning("All RT-DETR sources exhausted, using RetinaNet as final fallback")
         try:
             import torchvision.transforms as T
             from torchvision.models.detection import retinanet_resnet50_fpn
@@ -246,6 +411,35 @@ class KnowledgeDistiller:
                 'type': 'configured_sam',
                 'size': sam_config.get('model_size', 'large')
             })
+        
+        # Add config-specified teacher model
+        teachers_config = self.config.get('teachers', {})
+        if teachers_config.get('segmentation'):
+            # Parse teacher model specification like "HQ-SAM/sam-hq-vit-h"
+            teacher_model = teachers_config['segmentation']
+            if '/' in teacher_model:
+                org, model = teacher_model.split('/', 1)
+                if org.upper() == 'HQ-SAM':
+                    # Convert to appropriate Hugging Face model name
+                    if 'vit-h' in model:
+                        hf_model_name = "facebook/sam-vit-huge"
+                        size = 'huge'
+                    elif 'vit-l' in model:
+                        hf_model_name = "facebook/sam-vit-large" 
+                        size = 'large'
+                    elif 'vit-b' in model:
+                        hf_model_name = "facebook/sam-vit-base"
+                        size = 'base'
+                    else:
+                        # Default to large if unclear
+                        hf_model_name = "facebook/sam-vit-large"
+                        size = 'large'
+                    
+                    model_candidates.insert(0, {  # Insert at front for priority
+                        'name': hf_model_name,
+                        'type': 'teacher_hq_sam',
+                        'size': size
+                    })
         
         # Add standard SAM model variants in order of capability
         model_candidates.extend([
@@ -299,8 +493,93 @@ class KnowledgeDistiller:
                 logger.warning(f"Failed to load SAM model {candidate['name']}: {e}")
                 continue
         
-        # Fallback to DeepLabV3 if all SAM models fail
-        logger.warning("All SAM models failed, using DeepLabV3 fallback for segmentation")
+        # Before falling back, try alternative SAM implementations
+        logger.warning("Standard SAM models failed, trying alternative sources...")
+        
+        # Try alternative SAM sources and implementations
+        alternative_sam_candidates = [
+            {
+                'name': 'facebook/sam2-hiera-large',
+                'type': 'sam2_large',
+                'size': 'large'
+            },
+            {
+                'name': 'facebook/sam2-hiera-base-plus',
+                'type': 'sam2_base_plus',
+                'size': 'base_plus'
+            },
+            {
+                'name': 'facebook/sam2-hiera-small',
+                'type': 'sam2_small',
+                'size': 'small'
+            }
+        ]
+        
+        for alt_candidate in alternative_sam_candidates:
+            try:
+                logger.info(f"🔄 Trying alternative SAM: {alt_candidate['name']}")
+                
+                # Try SAM 2.0 models if available
+                try:
+                    from transformers import Sam2Model, Sam2Processor
+                    
+                    processor = Sam2Processor.from_pretrained(alt_candidate['name'])
+                    model = Sam2Model.from_pretrained(alt_candidate['name'])
+                    model.eval()
+                    model.to(self.device)
+                    
+                    logger.info(f"✅ Successfully loaded SAM 2.0: {alt_candidate['name']}")
+                    
+                    return {
+                        'model': model,
+                        'processor': processor,
+                        'type': alt_candidate['type'],
+                        'model_name': alt_candidate['name'],
+                        'model_size': alt_candidate['size'],
+                        'capabilities': {
+                            'high_quality': alt_candidate['size'] in ['large', 'base_plus'],
+                            'speed': 'fast' if alt_candidate['size'] == 'small' else 'medium',
+                            'memory_efficient': alt_candidate['size'] == 'small',
+                            'precision': 'very_high' if 'large' in alt_candidate['size'] else 'high',
+                            'version': '2.0'
+                        }
+                    }
+                    
+                except ImportError:
+                    # Fallback to original SAM if SAM 2.0 not available
+                    from transformers import SamModel, SamProcessor
+                    
+                    # Try to find equivalent SAM 1.0 model
+                    sam1_name = alt_candidate['name'].replace('sam2', 'sam').replace('-hiera', '-vit')
+                    
+                    processor = SamProcessor.from_pretrained(sam1_name)
+                    model = SamModel.from_pretrained(sam1_name)
+                    model.eval()
+                    model.to(self.device)
+                    
+                    logger.info(f"✅ Successfully loaded SAM 1.0 equivalent: {sam1_name}")
+                    
+                    return {
+                        'model': model,
+                        'processor': processor,
+                        'type': f"sam1_{alt_candidate['size']}",
+                        'model_name': sam1_name,
+                        'model_size': alt_candidate['size'],
+                        'capabilities': {
+                            'high_quality': alt_candidate['size'] != 'small',
+                            'speed': 'medium',
+                            'memory_efficient': alt_candidate['size'] == 'small',
+                            'precision': 'high',
+                            'version': '1.0'
+                        }
+                    }
+                
+            except Exception as e:
+                logger.warning(f"Alternative SAM {alt_candidate['name']} failed: {e}")
+                continue
+        
+        # Ultimate fallback to DeepLabV3 only after exhausting all SAM options
+        logger.warning("All SAM sources exhausted, using DeepLabV3 as final fallback")
         try:
             import torchvision.models.segmentation as seg_models
             import torchvision.transforms as T
@@ -336,19 +615,113 @@ class KnowledgeDistiller:
             return None
     
     def _load_beatnet(self):
-        """Load BeatNet for music structure and rhythm analysis"""
+        """
+        Load actual BeatNet model for advanced music structure and rhythm analysis.
+        Prioritizes real BeatNet implementation over librosa-based fallbacks.
+        """
+        
+        # Get model configuration from config
+        teacher_models = self.config.get('models', {}).get('teacher_models', {})
+        beatnet_config = teacher_models.get('beatnet', {})
+        
+        # Try to load the real BeatNet model first
         try:
-            # Try to load actual BeatNet model
+            # Attempt to import and load actual BeatNet
+            try:
+                import BeatNet
+                from BeatNet.BeatNet import BeatNet as RealBeatNet
+                
+                # Initialize with specified or default configuration
+                model_name = beatnet_config.get('model_name', 'beatnet')
+                model_size = beatnet_config.get('model_size', '1')  # BeatNet model variations
+                
+                # Load the actual BeatNet model
+                beatnet_model = RealBeatNet(
+                    model=model_size, 
+                    mode='offline',  # Use offline mode for better accuracy
+                    inference_model='DBN',  # Dynamic Bayesian Network for advanced inference
+                    plot=[],  # No plotting for automated processing
+                    thread=False
+                )
+                
+                logger.info("✅ Successfully loaded actual BeatNet model")
+                
+                return {
+                    'model': beatnet_model,
+                    'type': 'real_beatnet',
+                    'model_name': f'BeatNet-{model_size}',
+                    'capabilities': {
+                        'beat_tracking': True,
+                        'downbeat_detection': True,
+                        'tempo_estimation': True,
+                        'rhythmic_analysis': True,
+                        'structure_analysis': True,
+                        'real_time': False,  # Offline mode for accuracy
+                        'precision': 'high'
+                    },
+                    'processor': self._create_beatnet_processor(beatnet_model)
+                }
+                
+            except ImportError as e:
+                logger.warning(f"BeatNet package not available: {e}")
+                logger.info("Install with: pip install BeatNet")
+                raise e
+                
+            except Exception as e:
+                logger.warning(f"Failed to initialize BeatNet model: {e}")
+                raise e
+                
+        except Exception as e:
+            logger.warning(f"Real BeatNet model loading failed: {e}")
+            logger.info("Falling back to advanced librosa-based implementation")
+            
+            # Fallback to sophisticated librosa implementation
             try:
                 import librosa
+                import librosa.display
                 
-                class AdvancedBeatNet:
-                    """Advanced music analysis using librosa and enhanced algorithms"""
+                class AdvancedBeatNetFallback:
+                    """
+                    Advanced music analysis fallback using librosa and enhanced algorithms.
+                    Implements BeatNet-inspired techniques with librosa backend.
+                    """
                     
                     def __init__(self):
                         self.sr = 44100
                         self.hop_length = 512
                         self.frame_length = 2048
+    
+    def _create_beatnet_processor(self, beatnet_model):
+        """Create processor wrapper for BeatNet model"""
+        
+        def process_audio_with_beatnet(audio_data, sr=44100):
+            """Process audio using real BeatNet model"""
+            try:
+                # BeatNet expects specific input format
+                if isinstance(audio_data, torch.Tensor):
+                    audio_data = audio_data.cpu().numpy()
+                
+                # Ensure mono audio for BeatNet
+                if len(audio_data.shape) > 1:
+                    audio_data = audio_data.mean(axis=0)
+                
+                # Process with BeatNet
+                output = beatnet_model.process(audio_data)
+                
+                return {
+                    'beats': output.get('beats', []),
+                    'downbeats': output.get('downbeats', []),
+                    'tempo': output.get('tempo', 120),
+                    'time_signature': output.get('time_signature', [4, 4]),
+                    'beat_activation': output.get('beat_activation', []),
+                    'downbeat_activation': output.get('downbeat_activation', [])
+                }
+                
+            except Exception as e:
+                logger.warning(f"BeatNet processing failed: {e}")
+                return {'error': str(e)}
+        
+        return process_audio_with_beatnet
                         
                     def process_audio(self, audio_data):
                         """Advanced tempo, beat, and structure detection"""
@@ -541,22 +914,129 @@ class KnowledgeDistiller:
             return None
     
     def _load_demucs(self):
-        """Load Demucs for audio source separation"""
+        """
+        Load actual Demucs model for professional audio source separation.
+        Uses the real pre-trained Demucs models for high-quality separation.
+        """
+        
+        # Get model configuration from config
+        teacher_models = self.config.get('models', {}).get('teacher_models', {})
+        demucs_config = teacher_models.get('demucs', {})
+        
+        # Try to load the real Demucs model first
         try:
-            # Try to load actual Demucs model
+            # Attempt to load actual Demucs
+            try:
+                import demucs.api
+                from demucs import pretrained
+                from demucs.apply import apply_model
+                from demucs.audio import convert_audio
+                
+                # Get model name from config or use default
+                model_name = demucs_config.get('model_name', 'htdemucs')  # Latest hybrid transformer model
+                
+                # Load the pre-trained Demucs model
+                model = pretrained.get_model(model_name)
+                model.eval()
+                model.to(self.device)
+                
+                logger.info(f"✅ Successfully loaded real Demucs model: {model_name}")
+                
+                return {
+                    'model': model,
+                    'type': 'real_demucs',
+                    'model_name': model_name,
+                    'capabilities': {
+                        'source_separation': True,
+                        'stems': ['drums', 'bass', 'other', 'vocals'],
+                        'quality': 'professional',
+                        'real_time': False,  # High-quality mode
+                        'model_type': 'hybrid_transformer' if 'ht' in model_name else 'standard'
+                    },
+                    'processor': self._create_demucs_processor(model, model_name)
+                }
+                
+            except ImportError as e:
+                logger.warning(f"Demucs package not available: {e}")
+                logger.info("Install with: pip install demucs")
+                raise e
+                
+            except Exception as e:
+                logger.warning(f"Failed to load Demucs model: {e}")
+                raise e
+                
+        except Exception as e:
+            logger.warning(f"Real Demucs model loading failed: {e}")
+            logger.info("Falling back to advanced spectral separation implementation")
+            
+            # Fallback to sophisticated separation implementation
             try:
                 import librosa
                 from scipy import signal
                 import torchaudio
                 
-                class AdvancedDemucs:
-                    """Advanced audio source separation using sophisticated algorithms"""
+                class AdvancedDemucsalFallback:
+                    """
+                    Advanced audio source separation fallback using sophisticated algorithms.
+                    Implements Demucs-inspired techniques without requiring the full model.
+                    """
                     
                     def __init__(self):
                         self.sr = 44100
                         self.n_fft = 2048
                         self.hop_length = 512
                         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                        
+    
+    def _create_demucs_processor(self, model, model_name):
+        """Create processor wrapper for Demucs model"""
+        
+        def separate_with_demucs(audio_data, sr=44100):
+            """Process audio using real Demucs model"""
+            try:
+                from demucs.apply import apply_model
+                from demucs.audio import convert_audio
+                
+                # Ensure audio is in correct format for Demucs
+                if isinstance(audio_data, np.ndarray):
+                    audio_tensor = torch.from_numpy(audio_data).float()
+                else:
+                    audio_tensor = audio_data.float()
+                
+                # Ensure correct shape: [channels, samples]
+                if len(audio_tensor.shape) == 1:
+                    audio_tensor = audio_tensor.unsqueeze(0)  # Add channel dimension
+                elif len(audio_tensor.shape) == 2 and audio_tensor.shape[0] > audio_tensor.shape[1]:
+                    audio_tensor = audio_tensor.T  # Transpose if needed
+                
+                # Convert to model's expected sample rate and format
+                audio_tensor = convert_audio(audio_tensor, sr, model.samplerate, model.audio_channels)
+                audio_tensor = audio_tensor.to(self.device)
+                
+                # Apply Demucs separation
+                with torch.no_grad():
+                    separated = apply_model(model, audio_tensor.unsqueeze(0))[0]  # Add batch dim
+                
+                # Extract stems (typically: drums, bass, other, vocals)
+                stems = {}
+                if hasattr(model, 'sources'):
+                    for i, source in enumerate(model.sources):
+                        if i < separated.shape[0]:
+                            stems[source] = separated[i].cpu().numpy()
+                else:
+                    # Default stem names for most Demucs models
+                    stem_names = ['drums', 'bass', 'other', 'vocals']
+                    for i, name in enumerate(stem_names):
+                        if i < separated.shape[0]:
+                            stems[name] = separated[i].cpu().numpy()
+                
+                return stems
+                
+            except Exception as e:
+                logger.warning(f"Demucs separation failed: {e}")
+                return {'error': str(e)}
+        
+        return separate_with_demucs
                         
                         # Try to use torchaudio's separation if available
                         try:
