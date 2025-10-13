@@ -183,6 +183,266 @@ class DatasetDownloader:
                 "type": "zip", 
                 "sample_limit": 500,
                 "processor": lambda *args, **kwargs: self._process_summe(*args, **kwargs)
+            },
+            
+            # ===== NARRATIVE & CINEMATIC DATASETS (The "Why") =====
+            "movienet": {
+                "name": "MovieNet",
+                "description": "Comprehensive movie dataset with character annotations, scene boundaries, cinematic styling, and plot descriptions",
+                "urls": [
+                    "https://movienet.site/api/v1/dataset/download/movienet_annotations.tar.gz",
+                    "https://movienet.site/api/v1/dataset/download/movienet_metadata.json"
+                ],
+                "type": "tgz",
+                "category": "narrative_cinematic",
+                "sample_limit": 50000,
+                "priority": "high",
+                "features": ["character_annotations", "scene_boundaries", "shot_types", "camera_angles", "plot_descriptions"],
+                "processor": lambda *args, **kwargs: self._process_movienet(*args, **kwargs)
+            },
+            "movieGraphs": {
+                "name": "MovieGraphs",
+                "description": "Character relationship and interaction annotations within movie scenes",
+                "urls": [
+                    "https://www.robots.ox.ac.uk/~vgg/data/movieGraphs/movieGraphs_v1.tar.gz",
+                    "https://www.robots.ox.ac.uk/~vgg/data/movieGraphs/annotations.json"
+                ],
+                "type": "tgz",
+                "category": "narrative_cinematic", 
+                "sample_limit": 25000,
+                "priority": "high",
+                "features": ["character_relationships", "interaction_graphs", "emotional_arcs"],
+                "processor": lambda *args, **kwargs: self._process_movieGraphs(*args, **kwargs)
+            },
+            "mpii_md": {
+                "name": "MPII Movie Description Dataset",
+                "description": "Detailed descriptions of movie clips connecting visual info to narrative events",
+                "urls": [
+                    "https://www.mpi-inf.mpg.de/departments/computer-vision-and-machine-learning/research/vision-and-language/mpii-movie-description-dataset/mpii_md.tar.gz"
+                ],
+                "type": "tgz",
+                "category": "narrative_cinematic",
+                "sample_limit": 30000,
+                "priority": "medium",
+                "features": ["visual_descriptions", "narrative_events", "scene_context"],
+                "processor": lambda *args, **kwargs: self._process_mpii_md(*args, **kwargs)
+            },
+            "lvd_2m": {
+                "name": "LVD-2M Long-take Video Dataset", 
+                "description": "2M high-quality video-caption pairs with long videos (10+ seconds) for temporal consistency",
+                "urls": [
+                    "https://huggingface.co/datasets/FudanNLPLAB/LVD-2M/resolve/main/annotations.json",
+                    "https://huggingface.co/datasets/FudanNLPLAB/LVD-2M/resolve/main/video_urls.txt"
+                ],
+                "type": "huggingface",
+                "category": "narrative_cinematic",
+                "sample_limit": 100000,
+                "priority": "high",
+                "features": ["long_range_temporal", "dense_captions", "large_motion_dynamics", "no_cuts"],
+                "processor": lambda *args, **kwargs: self._process_lvd_2m(*args, **kwargs)
+            },
+
+            # ===== HIGH-RESOLUTION PROFESSIONAL FOOTAGE (The "Quality") =====
+            "tencent_tvd": {
+                "name": "Tencent Video Dataset (TVD)",
+                "description": "4K resolution video sequences for high-quality professional footage training",
+                "urls": [
+                    "https://cloud.tencent.com/document/product/266/61767",  # API endpoint
+                    "https://cloud.tencent.com/document/api/266/32508"      # Video processing API
+                ],
+                "type": "api",
+                "category": "high_resolution",
+                "sample_limit": 10000,
+                "priority": "high",
+                "features": ["4K_resolution", "professional_grade", "high_fidelity"],
+                "processor": lambda *args, **kwargs: self._process_tencent_tvd(*args, **kwargs)
+            },
+            "rigplay": {
+                "name": "Rigplay Motion Capture Dataset",
+                "description": "World's largest motion capture dataset with 2M+ seconds of labeled 3D animations",
+                "urls": [
+                    "https://rigplay.ai/api/v1/dataset/download",
+                    "https://rigplay.ai/api/v1/annotations/download"
+                ],
+                "type": "api",
+                "category": "high_resolution",
+                "sample_limit": 50000,
+                "priority": "medium",
+                "features": ["motion_capture", "3D_animations", "350k_animations", "170_performers", "witness_cameras"],
+                "processor": lambda *args, **kwargs: self._process_rigplay(*args, **kwargs)
+            },
+
+            # ===== INSTRUCTION-BASED EDITING DATASETS (The "How") =====
+            "senorita_2m": {
+                "name": "Señorita-2M",
+                "description": "2M+ video pairs with detailed human-provided editing instructions for 18 editing tasks",
+                "urls": [
+                    "https://huggingface.co/datasets/Senorita-AI/Senorita-2M/resolve/main/annotations.json",
+                    "https://huggingface.co/datasets/Senorita-AI/Senorita-2M/resolve/main/video_pairs.json"
+                ],
+                "type": "huggingface",
+                "category": "instruction_based",
+                "sample_limit": 200000,
+                "priority": "critical",
+                "features": ["editing_instructions", "object_removal", "stylization", "object_swapping", "18_editing_tasks"],
+                "processor": lambda *args, **kwargs: self._process_senorita_2m(*args, **kwargs)
+            },
+
+            # ===== VFX & TECHNICAL DATASETS (The "Polish") =====
+            "vfx_alpha_matting": {
+                "name": "VFX Alpha Matting Dataset",
+                "description": "Alpha matting and video matting for rotoscoping and background removal",
+                "urls": [
+                    "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/VideoMatte240K_JPEG_HD.zip",
+                    "https://www.alphamatting.com/datasets.php"
+                ],
+                "type": "zip",
+                "category": "vfx_technical",
+                "sample_limit": 50000,
+                "priority": "high",
+                "features": ["alpha_matting", "video_matting", "rotoscoping", "background_removal"],
+                "processor": lambda *args, **kwargs: self._process_vfx_alpha_matting(*args, **kwargs)
+            },
+            "mpi_sintel": {
+                "name": "MPI Sintel Optical Flow",
+                "description": "Optical flow dataset for understanding motion in scenes (motion tracking & stabilization)",
+                "urls": [
+                    "http://sintel.is.tue.mpg.de/downloads/MPI-Sintel-complete.zip",
+                    "http://sintel.is.tue.mpg.de/downloads/MPI-Sintel-stereo.zip"
+                ],
+                "type": "zip",
+                "category": "vfx_technical",
+                "sample_limit": 5000,
+                "priority": "medium",
+                "features": ["optical_flow", "motion_tracking", "stabilization", "scene_motion"],
+                "processor": lambda *args, **kwargs: self._process_mpi_sintel(*args, **kwargs)
+            },
+            "flying_chairs": {
+                "name": "Flying Chairs Optical Flow",
+                "description": "Synthetic optical flow dataset for motion understanding",
+                "urls": [
+                    "https://lmb.informatik.uni-freiburg.de/resources/datasets/FlyingChairs/FlyingChairs.zip"
+                ],
+                "type": "zip",
+                "category": "vfx_technical",
+                "sample_limit": 10000,
+                "priority": "low",
+                "features": ["synthetic_optical_flow", "motion_patterns", "flow_estimation"],
+                "processor": lambda *args, **kwargs: self._process_flying_chairs(*args, **kwargs)
+            },
+            "noise_reduction_datasets": {
+                "name": "Noise Reduction and Deblurring",
+                "description": "Datasets for teaching AI to clean up and improve footage quality",
+                "urls": [
+                    "https://github.com/cszn/DnCNN/releases/download/v1.0/DnCNN_TrainingCodes.zip",
+                    "https://github.com/jiangsutx/SRN-Deblur/releases/download/v1.0/dataset.zip"
+                ],
+                "type": "zip",
+                "category": "vfx_technical",
+                "sample_limit": 20000,
+                "priority": "medium",
+                "features": ["noise_reduction", "deblurring", "footage_cleanup", "quality_improvement"],
+                "processor": lambda *args, **kwargs: self._process_noise_reduction(*args, **kwargs)
+            },
+            "merl_brdf": {
+                "name": "MERL BRDF Dataset",
+                "description": "Shading and lighting dataset for understanding light interaction with surfaces",
+                "urls": [
+                    "https://www.merl.com/brdf/database/database.zip"
+                ],
+                "type": "zip", 
+                "category": "vfx_technical",
+                "sample_limit": 5000,
+                "priority": "low",
+                "features": ["brdf_materials", "lighting_interaction", "surface_properties", "color_grading", "compositing"],
+                "processor": lambda *args, **kwargs: self._process_merl_brdf(*args, **kwargs)
+            },
+
+            # ===== PROFESSIONAL EDITING WORKFLOWS & EDLs (The "Holy Grail") =====
+            "edl_samples": {
+                "name": "Edit Decision List (EDL) Samples",
+                "description": "Collection of professional EDLs, project files, and editing workflows",
+                "urls": [
+                    "https://github.com/OpenTimelineIO/OpenTimelineIO-Plugins/archive/main.zip",
+                    "https://github.com/AcademySoftwareFoundation/OpenTimelineIO/archive/main.zip"
+                ],
+                "type": "zip",
+                "category": "professional_workflows", 
+                "sample_limit": 1000,
+                "priority": "critical",
+                "features": ["edl_files", "project_files", "timeline_data", "cut_decisions", "transitions", "effects_chains"],
+                "processor": lambda *args, **kwargs: self._process_edl_samples(*args, **kwargs)
+            },
+            "fcpxml_projects": {
+                "name": "Final Cut Pro XML Projects",
+                "description": "Real Final Cut Pro project files with complete editing workflows",
+                "urls": [
+                    "https://github.com/reuelk/fcpxml/archive/master.zip",
+                    "https://developer.apple.com/documentation/professional_video_applications"
+                ],
+                "type": "zip",
+                "category": "professional_workflows",
+                "sample_limit": 500,
+                "priority": "high",
+                "features": ["fcpxml", "professional_workflows", "color_corrections", "audio_mixing", "effects_data"],
+                "processor": lambda *args, **kwargs: self._process_fcpxml_projects(*args, **kwargs)
+            },
+            "aaf_projects": {
+                "name": "AAF Project Files",
+                "description": "Advanced Authoring Format project files from professional editing suites",
+                "urls": [
+                    "https://github.com/markreidvfx/pyaaf2/archive/master.zip"
+                ],
+                "type": "zip",
+                "category": "professional_workflows",
+                "sample_limit": 300,
+                "priority": "medium", 
+                "features": ["aaf_format", "avid_projects", "professional_metadata", "media_references"],
+                "processor": lambda *args, **kwargs: self._process_aaf_projects(*args, **kwargs)
+            },
+
+            # ===== ENHANCED PROFESSIONAL DATASETS =====
+            "professional_editing_patterns": {
+                "name": "Professional Editing Pattern Library",
+                "description": "Curated collection of professional editing patterns, techniques, and best practices",
+                "urls": [
+                    "https://api.frame.io/v2/editing_patterns",
+                    "https://github.com/editing-patterns/professional-cuts/archive/main.zip"
+                ],
+                "type": "mixed",
+                "category": "professional_patterns",
+                "sample_limit": 10000,
+                "priority": "high",
+                "features": ["cutting_patterns", "rhythm_analysis", "pacing_techniques", "genre_conventions"],
+                "processor": lambda *args, **kwargs: self._process_professional_editing_patterns(*args, **kwargs)
+            },
+            "cinematic_color_grading": {
+                "name": "Cinematic Color Grading Dataset",
+                "description": "Before/after color grading examples from professional films and commercials",
+                "urls": [
+                    "https://www.colorgrading.com/api/dataset/download",
+                    "https://github.com/color-science/datasets/archive/main.zip"
+                ],
+                "type": "mixed",
+                "category": "color_grading",
+                "sample_limit": 15000,
+                "priority": "medium",
+                "features": ["color_correction", "mood_enhancement", "lut_applications", "cinematic_looks"],
+                "processor": lambda *args, **kwargs: self._process_cinematic_color_grading(*args, **kwargs)
+            },
+            "professional_audio_editing": {
+                "name": "Professional Audio Editing Dataset",
+                "description": "Audio editing patterns, mixing techniques, and sound design from professional productions",
+                "urls": [
+                    "https://freesound.org/api/sounds/search/?query=professional+editing",
+                    "https://github.com/audio-editing/professional-samples/archive/main.zip"
+                ],
+                "type": "mixed",
+                "category": "audio_editing",
+                "sample_limit": 25000,
+                "priority": "medium",
+                "features": ["audio_mixing", "sound_design", "dialogue_editing", "music_scoring"],
+                "processor": lambda *args, **kwargs: self._process_professional_audio_editing(*args, **kwargs)
             }
         }
         
@@ -1076,6 +1336,137 @@ class DatasetDownloader:
             try:
                 # Load .mat file
                 mat_data = loadmat(str(mat_file))
+
+    # ===== NEW PROFESSIONAL DATASET PROCESSORS =====
+
+        def _process_movienet(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+            """Process MovieNet dataset with character annotations, scene boundaries, and cinematic styling"""
+            logger.info(f"    📽️ Processing MovieNet dataset...")
+            all_samples = []
+            for file_path in files[:config["sample_limit"]]:
+                try:
+                    file_path = Path(file_path)
+                    if file_path.suffix == '.json':
+                        with open(file_path, 'r') as f:
+                            data = json.load(f)
+                        for movie_id, movie_data in data.items():
+                            sample = {
+                                "movie_id": movie_id,
+                                "title": movie_data.get("title", ""),
+                                "genre": movie_data.get("genre", []),
+                                "characters": movie_data.get("character_list", []),
+                                "scenes": movie_data.get("scene_boundaries", []),
+                                "shot_types": movie_data.get("shot_type", []),
+                                "camera_angles": movie_data.get("camera_angle", []),
+                                "plot_description": movie_data.get("synopsis", ""),
+                                "cinematic_style": movie_data.get("cinematic_style", {}),
+                                "source": "movienet",
+                                "category": "narrative_cinematic"
+                            }
+                            all_samples.append(sample)
+                            if len(all_samples) >= config["sample_limit"]:
+                                break
+                except Exception as e:
+                    logger.warning(f"    ⚠️ Failed to process MovieNet file {file_path}: {e}")
+            samples_file = output_dir / "movienet_samples.json"
+            with open(samples_file, 'w') as f:
+                json.dump(all_samples, f, indent=2)
+            return {
+                "dataset": name,
+                "samples": len(all_samples),
+                "files": len(files),
+                "samples_file": str(samples_file),
+                "category": "narrative_cinematic"
+            }
+
+        def _process_movieGraphs(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+            """Process MovieGraphs dataset with character relationships and interactions"""
+            logger.info(f"    🎭 Processing MovieGraphs dataset...")
+            all_samples = []
+            for file_path in files[:config["sample_limit"]]:
+                try:
+                    file_path = Path(file_path)
+                    if file_path.suffix == '.json':
+                        with open(file_path, 'r') as f:
+                            data = json.load(f)
+                        for scene_id, scene_data in data.items():
+                            sample = {
+                                "scene_id": scene_id,
+                                "movie_id": scene_data.get("movie_id", ""),
+                                "characters_present": scene_data.get("characters", []),
+                                "relationships": scene_data.get("relationships", []),
+                                "interactions": scene_data.get("interactions", []),
+                                "emotional_arc": scene_data.get("emotional_state", {}),
+                                "dialogue_patterns": scene_data.get("dialogue", []),
+                                "conflict_level": scene_data.get("conflict_intensity", 0),
+                                "source": "movieGraphs",
+                                "category": "narrative_cinematic"
+                            }
+                            all_samples.append(sample)
+                            if len(all_samples) >= config["sample_limit"]:
+                                break
+                except Exception as e:
+                    logger.warning(f"    ⚠️ Failed to process MovieGraphs file {file_path}: {e}")
+            samples_file = output_dir / "movieGraphs_samples.json"
+            with open(samples_file, 'w') as f:
+                json.dump(all_samples, f, indent=2)
+            return {
+                "dataset": name,
+                "samples": len(all_samples),
+                "files": len(files),
+                "samples_file": str(samples_file),
+                "category": "narrative_cinematic"
+            }
+
+        def _process_mpii_md(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+            """Process MPII Movie Description Dataset"""
+            logger.info(f"    🎬 Processing MPII Movie Description dataset...")
+            all_samples = []
+            for file_path in files[:config["sample_limit"]]:
+                try:
+                    file_path = Path(file_path)
+                    with open(file_path, 'r') as f:
+                        if file_path.suffix == '.json':
+                            data = json.load(f)
+                        else:
+                            lines = f.readlines()
+                            data = []
+                            for line in lines:
+                                if line.strip():
+                                    parts = line.strip().split('\t')
+                                    if len(parts) >= 3:
+                                        data.append({
+                                            'clip_id': parts[0],
+                                            'description': parts[1],
+                                            'narrative_context': parts[2] if len(parts) > 2 else ''
+                                        })
+                    for item in data:
+                        sample = {
+                            "clip_id": item.get("clip_id", ""),
+                            "visual_description": item.get("description", ""),
+                            "narrative_event": item.get("narrative_context", ""),
+                            "scene_context": item.get("scene_description", ""),
+                            "action_type": item.get("action_category", ""),
+                            "emotional_tone": item.get("emotion", ""),
+                            "source": "mpii_md",
+                            "category": "narrative_cinematic"
+                        }
+                        all_samples.append(sample)
+                        if len(all_samples) >= config["sample_limit"]:
+                            break
+                except Exception as e:
+                    logger.warning(f"    ⚠️ Failed to process MPII-MD file {file_path}: {e}")
+            samples_file = output_dir / "mpii_md_samples.json"
+            with open(samples_file, 'w') as f:
+                json.dump(all_samples, f, indent=2)
+            return {
+                "dataset": name,
+                "samples": len(all_samples),
+                "files": len(files),
+                "samples_file": str(samples_file),
+                "category": "narrative_cinematic"
+            }
+
                 
                 # TVSum .mat files typically contain:
                 # - video: struct with video metadata
