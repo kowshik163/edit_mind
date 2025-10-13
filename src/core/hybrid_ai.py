@@ -6,6 +6,8 @@ Combines reasoning, perception, and editing capabilities in a unified model
 import torch
 import torch.nn as nn
 import logging
+import os
+import tempfile
 from typing import Dict, List, Optional, Tuple, Any
 from transformers import (
     AutoTokenizer, 
@@ -362,23 +364,55 @@ class HybridVideoAI(nn.Module):
         timeline = self.timeline_generator.decode_timeline(timeline_logits)
         return timeline
     
-    def autonomous_edit(self, video_path: str, prompt: str) -> str:
+    def autonomous_edit(self, media_files=None, prompt: str = None, video_paths=None, video_path: str = None) -> str:
         """
         Fully autonomous video editing based on natural language prompt
         Enhanced with self-coding capabilities for custom effects
+        Supports multiple input media types: videos, images, and audio
         
         Args:
-            video_path: Path to input video
+            media_files: Dict with keys 'videos', 'images', 'audio' containing file paths (new parameter)
+            video_paths: List of paths to input videos (for backward compatibility)
+            video_path: Single video path (for backward compatibility)
             prompt: Natural language editing instruction
             
         Returns:
             Path to edited video
         """
-        logger.info(f"🎬 Starting autonomous edit: {prompt}")
+        # Handle backward compatibility and parameter validation
+        if media_files is None and video_paths is None and video_path is None:
+            raise ValueError("Either media_files, video_paths, or video_path must be provided")
         
-        # Load and preprocess video
-        video_data = self.vision_processor.load_video(video_path)
-        audio_data = self.audio_processor.load_audio(video_path)
+        if prompt is None:
+            raise ValueError("prompt parameter is required")
+        
+        # Handle backwards compatibility
+        if video_path is not None:
+            media_files = {'videos': [video_path], 'images': [], 'audio': []}
+        elif video_paths is not None:
+            if isinstance(video_paths, str):
+                video_paths = [video_paths]
+            media_files = {'videos': video_paths, 'images': [], 'audio': []}
+        elif media_files is None:
+            raise ValueError("media_files parameter is required")
+        
+        # Ensure media_files has the expected structure
+        if not isinstance(media_files, dict):
+            raise ValueError("media_files must be a dictionary with 'videos', 'images', 'audio' keys")
+        
+        videos = media_files.get('videos', [])
+        images = media_files.get('images', [])
+        audios = media_files.get('audio', [])
+            
+        logger.info(f"🎬 Starting autonomous multimedia edit: {len(videos)} video(s), {len(images)} image(s), {len(audios)} audio(s)")
+        logger.info(f"� Prompt: {prompt}")
+        
+        # Process multimedia inputs to create comprehensive video data
+        multimedia_data = self._process_multimedia_inputs(videos, images, audios)
+        
+        # Extract video and audio data from multimedia composition
+        video_data = multimedia_data['video_data']
+        audio_data = multimedia_data['audio_data']
         
         # Analyze prompt for custom effect requirements
         custom_effects = self._analyze_prompt_for_custom_effects(prompt)
@@ -418,6 +452,273 @@ class HybridVideoAI(nn.Module):
         
         logger.info(f"🎉 Autonomous edit complete: {output_path}")
         return output_path
+    
+    def _concatenate_videos(self, video_paths: List[str]) -> str:
+        """
+        Concatenate multiple videos into a single video file
+        
+        Args:
+            video_paths: List of paths to video files to concatenate
+            
+        Returns:
+            Path to concatenated video file
+        """
+        try:
+            from moviepy.editor import VideoFileClip, concatenate_videoclips
+            
+            logger.info(f"🔗 Loading {len(video_paths)} videos for concatenation...")
+            clips = []
+            
+            for i, video_path in enumerate(video_paths):
+                if not os.path.exists(video_path):
+                    logger.error(f"Video file not found: {video_path}")
+                    continue
+                    
+                try:
+                    clip = VideoFileClip(video_path)
+                    clips.append(clip)
+                    logger.info(f"✅ Loaded video {i+1}/{len(video_paths)}: {video_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load video {video_path}: {e}")
+                    continue
+            
+            if not clips:
+                raise ValueError("No valid video clips could be loaded")
+            
+            if len(clips) == 1:
+                logger.info("Only one valid video found, using it directly")
+                concatenated_clip = clips[0]
+            else:
+                logger.info(f"🎬 Concatenating {len(clips)} video clips...")
+                concatenated_clip = concatenate_videoclips(clips, method="compose")
+            
+            # Create temporary file for concatenated video
+            temp_dir = tempfile.gettempdir()
+            concatenated_path = os.path.join(temp_dir, f"concatenated_video_{os.getpid()}.mp4")
+            
+            # Write concatenated video
+            logger.info(f"💾 Writing concatenated video to: {concatenated_path}")
+            concatenated_clip.write_videofile(
+                concatenated_path,
+                codec='libx264',
+                audio_codec='aac',
+                verbose=False,
+                logger=None  # Suppress moviepy logs
+            )
+            
+            # Clean up clips
+            for clip in clips:
+                clip.close()
+            concatenated_clip.close()
+            
+            logger.info(f"✅ Video concatenation complete: {concatenated_path}")
+            return concatenated_path
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to concatenate videos: {e}")
+            # Fallback: use first valid video
+            for video_path in video_paths:
+                if os.path.exists(video_path):
+                    logger.warning(f"⚠️ Falling back to first valid video: {video_path}")
+                    return video_path
+            raise ValueError(f"No valid video files found in: {video_paths}")
+    
+    def _process_multimedia_inputs(self, videos: List[str], images: List[str], audios: List[str]) -> Dict[str, Any]:
+        """
+        Process mixed multimedia inputs and create a unified video composition
+        
+        Args:
+            videos: List of video file paths
+            images: List of image file paths  
+            audios: List of audio file paths
+            
+        Returns:
+            Dict containing processed video and audio data
+        """
+        logger.info(f"🎯 Processing multimedia inputs: {len(videos)} videos, {len(images)} images, {len(audios)} audios")
+        
+        try:
+            from moviepy.editor import VideoFileClip, ImageClip, AudioFileClip, concatenate_videoclips, CompositeAudioClip
+            import cv2
+            import numpy as np
+            
+            # Collect all video clips
+            video_clips = []
+            
+            # Process video files
+            if videos:
+                logger.info(f"📹 Processing {len(videos)} video files...")
+                for i, video_path in enumerate(videos):
+                    if os.path.exists(video_path):
+                        try:
+                            clip = VideoFileClip(video_path)
+                            video_clips.append(clip)
+                            logger.info(f"✅ Loaded video {i+1}: {video_path}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to load video {video_path}: {e}")
+            
+            # Process image files (convert to video clips)
+            if images:
+                logger.info(f"🖼️ Processing {len(images)} image files...")
+                default_duration = 3.0  # Default 3 seconds per image
+                for i, image_path in enumerate(images):
+                    if os.path.exists(image_path):
+                        try:
+                            # Create video clip from image
+                            img_clip = ImageClip(image_path, duration=default_duration)
+                            video_clips.append(img_clip)
+                            logger.info(f"✅ Loaded image {i+1}: {image_path} (duration: {default_duration}s)")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to load image {image_path}: {e}")
+            
+            # Create base video composition
+            if not video_clips:
+                logger.warning("⚠️ No valid video or image content found, creating blank video")
+                # Create a 5-second blank video as fallback
+                blank_clip = ImageClip(np.zeros((720, 1280, 3), dtype=np.uint8), duration=5.0)
+                video_clips.append(blank_clip)
+            
+            # Concatenate all video content
+            if len(video_clips) == 1:
+                final_video_clip = video_clips[0]
+            else:
+                logger.info(f"🔗 Concatenating {len(video_clips)} video segments...")
+                final_video_clip = concatenate_videoclips(video_clips, method="compose")
+            
+            # Process audio files
+            audio_clips = []
+            
+            # Add existing audio from videos (already included in video clips)
+            if final_video_clip.audio is not None:
+                audio_clips.append(final_video_clip.audio)
+            
+            # Process standalone audio files
+            if audios:
+                logger.info(f"🎵 Processing {len(audios)} audio files...")
+                for i, audio_path in enumerate(audios):
+                    if os.path.exists(audio_path):
+                        try:
+                            audio_clip = AudioFileClip(audio_path)
+                            audio_clips.append(audio_clip)
+                            logger.info(f"✅ Loaded audio {i+1}: {audio_path}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to load audio {audio_path}: {e}")
+            
+            # Combine all audio
+            if len(audio_clips) > 1:
+                logger.info(f"🎵 Mixing {len(audio_clips)} audio tracks...")
+                final_audio = CompositeAudioClip(audio_clips)
+            elif len(audio_clips) == 1:
+                final_audio = audio_clips[0]
+            else:
+                final_audio = None
+            
+            # Apply audio to video
+            if final_audio is not None:
+                final_video_clip = final_video_clip.set_audio(final_audio)
+            
+            # Save temporary composed video
+            temp_dir = tempfile.gettempdir()
+            temp_video_path = os.path.join(temp_dir, f"multimedia_composition_{os.getpid()}.mp4")
+            
+            logger.info(f"💾 Writing multimedia composition to: {temp_video_path}")
+            final_video_clip.write_videofile(
+                temp_video_path,
+                codec='libx264',
+                audio_codec='aac',
+                verbose=False,
+                logger=None
+            )
+            
+            # Clean up clips
+            for clip in video_clips:
+                clip.close()
+            for clip in audio_clips:
+                clip.close()
+            final_video_clip.close()
+            
+            # Now process the composed video through our standard pipeline
+            logger.info("🔍 Analyzing composed multimedia content...")
+            video_data = self.vision_processor.load_video(temp_video_path)
+            audio_data = self.audio_processor.load_audio(temp_video_path)
+            
+            # Add metadata about source files
+            multimedia_metadata = {
+                'source_videos': len(videos),
+                'source_images': len(images), 
+                'source_audios': len(audios),
+                'composition_path': temp_video_path,
+                'total_duration': video_data.get('duration', 0),
+                'mixed_media': True
+            }
+            
+            video_data['multimedia_metadata'] = multimedia_metadata
+            audio_data['multimedia_metadata'] = multimedia_metadata
+            
+            logger.info(f"✅ Multimedia processing complete - Duration: {multimedia_metadata['total_duration']:.2f}s")
+            
+            return {
+                'video_data': video_data,
+                'audio_data': audio_data,
+                'temp_composition_path': temp_video_path
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process multimedia inputs: {e}")
+            # Fallback: try to use first available media file
+            all_media = videos + images + audios
+            if all_media:
+                fallback_path = all_media[0]
+                logger.warning(f"⚠️ Falling back to single media file: {fallback_path}")
+                
+                if fallback_path in videos:
+                    video_data = self.vision_processor.load_video(fallback_path)
+                    audio_data = self.audio_processor.load_audio(fallback_path)
+                else:
+                    # For images/audio, create minimal video data
+                    video_data = self._create_minimal_video_data()
+                    audio_data = self._create_minimal_audio_data()
+                
+                return {
+                    'video_data': video_data,
+                    'audio_data': audio_data,
+                    'temp_composition_path': None
+                }
+            else:
+                raise ValueError("No valid media files provided")
+    
+    def _create_minimal_video_data(self) -> Dict[str, Any]:
+        """Create minimal video data for fallback scenarios"""
+        return {
+            'frames': torch.zeros((1, 3, 224, 224)),  # Single black frame
+            'fps': 30.0,
+            'duration': 1.0,
+            'num_frames': 1,
+            'width': 224,
+            'height': 224,
+            'embeddings': None,
+            'detections': [],
+            'scene_stats': {},
+            'temporal_features': None
+        }
+    
+    def _create_minimal_audio_data(self) -> Dict[str, Any]:
+        """Create minimal audio data for fallback scenarios"""
+        return {
+            'features': {
+                'mfcc': torch.zeros((1, 13)),
+                'spectral_centroid': torch.zeros(1),
+                'spectral_rolloff': torch.zeros(1),
+                'zero_crossing_rate': torch.zeros(1),
+                'tempo': torch.tensor([120.0]),
+                'chroma': torch.zeros((1, 12)),
+                'mel_spectrogram': torch.zeros((1, 128, 100))
+            },
+            'transcription': {'text': '', 'confidence': 0.0, 'language': 'unknown'},
+            'content_analysis': {},
+            'events': [],
+            'audio_path': None
+        }
     
     def _analyze_prompt_for_custom_effects(self, prompt: str) -> List[str]:
         """

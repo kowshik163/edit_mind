@@ -342,6 +342,67 @@ class VisionProcessor:
             logger.error(f"Error loading video {video_path}: {e}")
             return self._get_empty_video_data()
     
+    def load_image(self, image_path: str, duration: float = 3.0) -> Dict[str, Any]:
+        """
+        Load and preprocess single image file as video data
+        
+        Args:
+            image_path: Path to image file
+            duration: Duration in seconds to treat image as video
+            
+        Returns:
+            Video-like data structure for compatibility
+        """
+        try:
+            if not os.path.exists(image_path):
+                logger.error(f"Image file not found: {image_path}")
+                return self._get_empty_video_data()
+            
+            # Load image using OpenCV
+            image = cv2.imread(image_path)
+            if image is None:
+                logger.error(f"Failed to load image: {image_path}")
+                return self._get_empty_video_data()
+            
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Resize to standard frame size
+            image = cv2.resize(image, self.frame_size)
+            
+            # Convert to tensor format
+            image_tensor = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
+            
+            # Create video-like data structure
+            # Simulate multiple frames for the duration
+            fps = 30.0
+            num_frames = int(duration * fps)
+            
+            # Repeat the same frame for the duration
+            frames = image_tensor.unsqueeze(0).repeat(num_frames, 1, 1, 1)
+            
+            # Analyze the single frame
+            analysis = self.analyze_scene([image_tensor])
+            
+            return {
+                'frames': frames,
+                'fps': fps,
+                'duration': duration,
+                'num_frames': num_frames,
+                'width': self.frame_size[0],
+                'height': self.frame_size[1],
+                'embeddings': analysis.get('embeddings'),
+                'detections': analysis.get('detections', []),
+                'scene_stats': analysis.get('scene_stats', {}),
+                'temporal_features': analysis.get('temporal_features'),
+                'is_image': True,  # Mark as originally an image
+                'source_path': image_path
+            }
+            
+        except Exception as e:
+            logger.error(f"Error loading image {image_path}: {e}")
+            return self._get_empty_video_data()
+    
     def _get_empty_video_data(self) -> Dict[str, Any]:
         """Return empty video data structure"""
         return {

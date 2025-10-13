@@ -36,16 +36,26 @@ class AudioProcessor:
         
         logger.info(f"AudioProcessor initialized on {self.device}")
     
-    def load_audio(self, video_path: str) -> Dict[str, Any]:
-        """Load and preprocess audio from video file - FIXED to return actual data"""
+    def load_audio(self, media_path: str) -> Dict[str, Any]:
+        """Load and preprocess audio from video or audio file - FIXED to return actual data"""
         try:
             # Check if file exists
-            if not os.path.exists(video_path):
-                logger.error(f"Video file not found: {video_path}")
+            if not os.path.exists(media_path):
+                logger.error(f"Media file not found: {media_path}")
                 return self._get_empty_audio_data()
             
-            # Extract audio using ffmpeg
-            audio_path = self._extract_audio(video_path)
+            # Check if it's an audio file or video file
+            audio_extensions = {'.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.wma'}
+            file_extension = os.path.splitext(media_path)[1].lower()
+            
+            if file_extension in audio_extensions:
+                # Direct audio file - use it directly
+                audio_path = media_path
+                logger.info(f"Loading audio file directly: {media_path}")
+            else:
+                # Video file - extract audio using ffmpeg
+                audio_path = self._extract_audio(media_path)
+                logger.info(f"Extracting audio from video: {media_path}")
             
             # Load audio with librosa
             try:
@@ -82,7 +92,7 @@ class AudioProcessor:
             }
             
         except Exception as e:
-            logger.error(f"Error loading audio from {video_path}: {e}")
+            logger.error(f"Error loading audio from {media_path}: {e}")
             return self._get_empty_audio_data()
     
     def _get_empty_audio_data(self) -> Dict[str, Any]:

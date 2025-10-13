@@ -5,7 +5,7 @@ Command Line Interface for Autonomous Video Editor
 import typer
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from rich.console import Console
 from rich.progress import track
 import sys
@@ -27,7 +27,7 @@ console = Console()
 
 @app.command()
 def edit(
-    video: Path = typer.Argument(..., help="Input video file"),
+    media_files: List[Path] = typer.Argument(..., help="Input media files (videos, images, audio - one or more)"),
     prompt: str = typer.Argument(..., help="Editing instruction"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output video path"),
     model: Path = typer.Option("checkpoints/best_model.pt", "--model", "-m", help="Model checkpoint"),
@@ -36,29 +36,73 @@ def edit(
     config: Path = typer.Option("configs/main_config.yaml", "--config", "-c", help="Config file")
 ):
     """
-    🎬 Edit a video autonomously using AI
+    🎬 Edit media files autonomously using AI
+    
+    Supported Media Types:
+    - Videos: .mp4, .avi, .mov, .mkv, .webm
+    - Images: .jpg, .jpeg, .png, .bmp, .tiff
+    - Audio: .mp3, .wav, .aac, .flac, .ogg
     
     Examples:
     
     auto-editor edit video.mp4 "Create an AMV with beat sync and cool transitions"
     
-    auto-editor edit video.mp4 "Make a cinematic trailer" --style cinematic
+    auto-editor edit video1.mp4 video2.mp4 image1.jpg audio1.mp3 "Combine into epic montage"
+    
+    auto-editor edit *.jpg "Create slideshow video from images" --style cinematic
+    
+    auto-editor edit audio.mp3 image1.jpg image2.png "Create music video with images"
     """
     
     setup_logging()
     logger = logging.getLogger(__name__)
     
-    console.print("[bold green]🎬 Autonomous Video Editor[/bold green]")
-    console.print(f"📹 Input: {video}")
+    console.print("[bold green]🎬 Autonomous Multi-Media Editor[/bold green]")
+    
+    # Categorize media files by type
+    video_files = []
+    image_files = []
+    audio_files = []
+    
+    video_exts = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv'}
+    image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif', '.webp'}
+    audio_exts = {'.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.wma'}
+    
+    for media_file in media_files:
+        ext = media_file.suffix.lower()
+        if ext in video_exts:
+            video_files.append(media_file)
+        elif ext in image_exts:
+            image_files.append(media_file)
+        elif ext in audio_exts:
+            audio_files.append(media_file)
+        else:
+            console.print(f"[yellow]⚠️ Unsupported file type: {media_file} (extension: {ext})[/yellow]")
+    
+    console.print(f"📹 Videos: {len(video_files)} file(s)")
+    console.print(f"🖼️ Images: {len(image_files)} file(s)")
+    console.print(f"🎵 Audio: {len(audio_files)} file(s)")
+    console.print(f"📁 Total: {len(media_files)} media file(s)")
+    
+    for i, media_file in enumerate(media_files, 1):
+        file_type = "📹" if media_file in video_files else "🖼️" if media_file in image_files else "🎵"
+        console.print(f"  {i}. {file_type} {media_file}")
     console.print(f"💭 Prompt: {prompt}")
     
-    if not video.exists():
-        console.print(f"[red]❌ Video file not found: {video}[/red]")
+    # Validate all media files exist
+    missing_files = [media_file for media_file in media_files if not media_file.exists()]
+    if missing_files:
+        console.print(f"[red]❌ Media file(s) not found:[/red]")
+        for missing in missing_files:
+            console.print(f"  - {missing}")
         raise typer.Exit(1)
     
-    # Auto-generate output path
+    # Auto-generate output path based on first media file
     if output is None:
-        output = video.parent / f"{video.stem}_edited{video.suffix}"
+        first_file = media_files[0]
+        suffix = "_multimedia_edited" if len(media_files) > 1 else "_edited"
+        # Always output as .mp4 since we're creating a video
+        output = first_file.parent / f"{first_file.stem}{suffix}.mp4"
     
     console.print(f"📁 Output: {output}")
     
@@ -77,9 +121,13 @@ def edit(
             editing_prompt = f"Style: {style}. {editing_prompt}"
         
         # Run editing
-        with console.status("[bold blue]🎨 Creating autonomous edit...[/bold blue]"):
+        with console.status("[bold blue]🎨 Creating autonomous multimedia edit...[/bold blue]"):
             output_path = model_obj.autonomous_edit(
-                video_path=str(video),
+                media_files={
+                    'videos': [str(f) for f in video_files],
+                    'images': [str(f) for f in image_files],
+                    'audio': [str(f) for f in audio_files]
+                },
                 prompt=editing_prompt
             )
         
