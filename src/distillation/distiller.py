@@ -690,6 +690,12 @@ class KnowledgeDistiller:
                         self.sr = 44100
                         self.hop_length = 512
                         self.frame_length = 2048
+                        
+                return AdvancedBeatNetFallback()
+                        
+            except ImportError as e:
+                logger.warning(f"Fallback implementation failed: {e}")
+                return None
     
     def _create_beatnet_processor(self, beatnet_model):
         """Create processor wrapper for BeatNet model"""

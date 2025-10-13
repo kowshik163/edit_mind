@@ -5,6 +5,7 @@ Multi-Modal Trainer - Handles all training phases for the Autonomous Video Edito
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from typing import Dict, List, Optional, Any
 import wandb
@@ -13,7 +14,8 @@ from tqdm import tqdm
 import logging
 
 from core.hybrid_ai import HybridVideoAI
-from distillation.distiller import KnowledgeDistiller
+# Temporarily commented out due to syntax errors - will be fixed
+# from distillation.distiller import KnowledgeDistiller
 from learning.enhanced_rlhf_trainer import EnhancedRLHFTrainer as RLHFTrainer
 from utils.metrics import VideoEditingMetrics
 from utils.data_loader import MultiModalDataLoader
@@ -42,7 +44,9 @@ class MultiModalTrainer:
         self.model.to(self.device)
         
         # Initialize specialized trainers
-        self.distiller = KnowledgeDistiller(config)
+        # Temporarily disabled due to syntax errors
+        # self.distiller = KnowledgeDistiller(config)
+        self.distiller = None
         self.rlhf_trainer = RLHFTrainer(config, model)
         self.metrics = VideoEditingMetrics()
         

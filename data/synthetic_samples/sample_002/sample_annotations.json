@@ -1,0 +1,94 @@
+{
+  "video_info": {
+    "path": "data/synthetic_samples/sample_002/video_002.mp4",
+    "duration": 10.0,
+    "fps": 30,
+    "width": 640,
+    "height": 480,
+    "total_frames": 300
+  },
+  "audio_info": {
+    "path": "data/synthetic_samples/sample_002/audio_002.wav",
+    "duration": 10.0,
+    "sample_rate": 16000,
+    "total_samples": 160000
+  },
+  "editing_annotations": {
+    "cuts": [
+      2.5,
+      5.0,
+      7.5
+    ],
+    "scenes": [
+      {
+        "start": 0.0,
+        "end": 2.5,
+        "type": "intro"
+      },
+      {
+        "start": 2.5,
+        "end": 5.0,
+        "type": "action"
+      },
+      {
+        "start": 5.0,
+        "end": 7.5,
+        "type": "climax"
+      },
+      {
+        "start": 7.5,
+        "end": 10.0,
+        "type": "outro"
+      }
+    ],
+    "beats": [
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      3.5,
+      4.0,
+      4.5,
+      5.0,
+      5.5,
+      6.0,
+      6.5,
+      7.0,
+      7.5,
+      8.0,
+      8.5,
+      9.0,
+      9.5
+    ],
+    "effects": [
+      {
+        "type": "fade_in",
+        "start": 0.0,
+        "duration": 0.5
+      },
+      {
+        "type": "zoom",
+        "start": 2.5,
+        "duration": 1.0
+      },
+      {
+        "type": "color_enhance",
+        "start": 5.0,
+        "duration": 2.5
+      },
+      {
+        "type": "fade_out",
+        "start": 9.5,
+        "duration": 0.5
+      }
+    ]
+  },
+  "text_prompts": [
+    "Create an exciting montage with beat-synchronized cuts",
+    "Make a smooth cinematic edit with dramatic lighting",
+    "Generate a fast-paced action sequence",
+    "Create a contemplative slow-motion sequence"
+  ]
+}

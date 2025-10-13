@@ -1,0 +1,76 @@
+project_name: autonomous_video_editor_test_run
+description: Minimal configuration for testing the pipeline on a local machine.
+
+paths:
+  cache_dir: ./cache
+  data_dir: ./data/synthetic_samples  # Point to the local data we will create
+  output_dir: ./outputs
+
+# Use small, widely available models instead of massive ones
+teachers:
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+  audio_models:
+    - openai/whisper-tiny
+  code_generation: codellama/CodeLlama-7b-hf # Smallest CodeLlama
+
+students:
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+  audio_models:
+    - openai/whisper-tiny
+
+# Disable or minimize complex training phases
+distillation:
+  strategies:
+    - feature_matching
+  temperature: 2.0
+  alpha: 0.5
+  batch_size: 1 # Use a batch size of 1 for minimal memory usage
+  learning_rate: 1e-5
+
+# Training configuration for safe mode
+training:
+  phases: ['pretrain', 'distill']  # Skip complex phases for safe mode
+  batch_size: 2
+  learning_rate: 1e-4
+  num_epochs: 1
+  gradient_accumulation_steps: 1
+  warmup_steps: 10
+  eval_steps: 10
+  save_steps: 20
+  max_grad_norm: 1.0
+
+# Data configuration for safe mode  
+data:
+  datasets: []  # Start with no datasets, use synthetic only
+  max_samples_per_dataset: 50
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  num_workers: 1
+
+finetuning:
+  method: qlora
+  max_epochs: 1
+  gradient_accumulation: 1
+  save_every: 100
+  eval_every: 50
+
+# Disable RLHF and Self-Coding for the test run
+rlhf:
+  enabled: false
+self_coding:
+  enabled: false
+
+# Crucially, remove all large online datasets
+datasets:
+  templates:
+    enabled: false
+  stock_footage:
+    enabled: false
+
+evaluation:
+  metrics:
+    - bleu
+    - rouge

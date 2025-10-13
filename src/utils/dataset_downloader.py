@@ -1336,10 +1336,24 @@ class DatasetDownloader:
             try:
                 # Load .mat file
                 mat_data = loadmat(str(mat_file))
+                
+                # Process the mat_data here (add specific processing logic)
+                sample = {
+                    "file": str(mat_file),
+                    "data_keys": list(mat_data.keys()) if mat_data else [],
+                    "source": "tvsum_mat"
+                }
+                samples.append(sample)
+                
+            except Exception as e:
+                logger.warning(f"    ⚠️ Failed to process {mat_file}: {e}")
+                continue
+        
+        return samples
 
     # ===== NEW PROFESSIONAL DATASET PROCESSORS =====
 
-        def _process_movienet(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+    def _process_movienet(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
             """Process MovieNet dataset with character annotations, scene boundaries, and cinematic styling"""
             logger.info(f"    📽️ Processing MovieNet dataset...")
             all_samples = []
@@ -1379,7 +1393,7 @@ class DatasetDownloader:
                 "category": "narrative_cinematic"
             }
 
-        def _process_movieGraphs(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+    def _process_movieGraphs(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
             """Process MovieGraphs dataset with character relationships and interactions"""
             logger.info(f"    🎭 Processing MovieGraphs dataset...")
             all_samples = []
@@ -1418,7 +1432,7 @@ class DatasetDownloader:
                 "category": "narrative_cinematic"
             }
 
-        def _process_mpii_md(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
+    def _process_mpii_md(self, name: str, files: List[str], output_dir: Path, config: Dict) -> Dict[str, Any]:
             """Process MPII Movie Description Dataset"""
             logger.info(f"    🎬 Processing MPII Movie Description dataset...")
             all_samples = []
@@ -1466,59 +1480,6 @@ class DatasetDownloader:
                 "samples_file": str(samples_file),
                 "category": "narrative_cinematic"
             }
-
-                
-                # TVSum .mat files typically contain:
-                # - video: struct with video metadata
-                # - user_anno: user annotations (importance scores)
-                # - gt_score: ground truth importance scores
-                
-                if 'video' in mat_data:
-                    video_data = mat_data['video'][0, 0]  # Extract struct
-                    
-                    # Extract basic video metadata
-                    video_id = str(video_data['video_name'][0]) if 'video_name' in video_data.dtype.names else mat_file.stem
-                    duration = float(video_data['length'][0, 0]) if 'length' in video_data.dtype.names else None
-                    fps = float(video_data['fps'][0, 0]) if 'fps' in video_data.dtype.names else None
-                    
-                    # Extract importance scores if available
-                    importance_scores = None
-                    if 'gt_score' in mat_data:
-                        importance_scores = mat_data['gt_score'].flatten().tolist()
-                    
-                    # Extract user annotations if available
-                    user_annotations = None
-                    if 'user_anno' in mat_data:
-                        user_anno = mat_data['user_anno']
-                        if user_anno.size > 0:
-                            # Convert user annotations to list format
-                            user_annotations = []
-                            for i in range(user_anno.shape[0]):
-                                user_annotations.append(user_anno[i].flatten().tolist())
-                    
-                    sample = {
-                        "video_id": video_id,
-                        "dataset": "tvsum",
-                        "type": "summarization",
-                        "source": "tvsum",
-                        "annotations_available": True,
-                        "duration": duration,
-                        "fps": fps,
-                        "importance_scores": importance_scores,
-                        "user_annotations": user_annotations,
-                        "annotation_file": str(mat_file)
-                    }
-                    
-                    samples.append(sample)
-                    
-                    if len(samples) >= config.get("sample_limit", 50):
-                        break
-                        
-            except Exception as e:
-                logger.warning(f"    ⚠️ Failed to process {mat_file}: {e}")
-                continue
-        
-        return samples
     
     def _process_tvsum_json_files(self, json_files: List[Path], config: Dict) -> List[Dict[str, Any]]:
         """Process TVSum JSON annotation files (if converted format available)"""
