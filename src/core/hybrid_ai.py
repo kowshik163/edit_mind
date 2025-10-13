@@ -15,16 +15,16 @@ from transformers import (
     WhisperModel
 )
 
-from ..models.multimodal_fusion import MultiModalFusionModule
-from ..models.video_understanding import VideoUnderstandingModule
-from ..models.editing_planner import EditingPlannerModule
-from ..perception.vision_processor import VisionProcessor
-from ..utils.model_downloader import ModelDownloader
+from models.multimodal_fusion import MultiModalFusionModule
+from models.video_understanding import VideoUnderstandingModule
+from models.editing_planner import EditingPlannerModule
+from perception.vision_processor import VisionProcessor
+from utils.model_downloader import ModelDownloader
 
 # Setup logging
 logger = logging.getLogger(__name__)
-from ..audio.audio_processor import AudioProcessor
-from ..editing.timeline_generator import TimelineGenerator
+from audio.audio_processor import AudioProcessor
+from editing.timeline_generator import TimelineGenerator
 
 
 class HybridVideoAI(nn.Module):

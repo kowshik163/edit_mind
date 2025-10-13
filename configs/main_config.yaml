@@ -22,6 +22,14 @@ teachers:
   music_analysis: BeatNet/beatnet  # Music structure and rhythm
   audio_separation: Demucs/htdemucs  # Audio source separation
   
+  # New advanced video generation models
+  video_generation:
+    wan: alibaba-pai/Wan-2.2  # Alibaba's Wan 2.2 video generation
+    mochi: genmo/mochi-1  # Genmo's Mochi 1 video model
+    ltx_video: lightricks/ltx-video  # Lightricks LTX-Video
+    hunyuan_video: tencent/hunyuan-video  # Tencent HunyuanVideo
+    videocrafter: VideoCrafter/VideoCrafter1  # VideoCrafter1
+  
   # Self-coding teacher model
   code_generation: codellama/CodeLlama-13b-Python-hf
 
@@ -113,6 +121,8 @@ datasets:
   video:
     - WebVid10M
     - ActivityNet-Captions
+    - UCF101  # Action recognition dataset
+    - Kinetics-400  # Large-scale video action dataset
   audio:
     - AudioSet
     - Librispeech
@@ -123,6 +133,46 @@ datasets:
     - MSRVTT
     - HowTo100M
     - COCO-Captions
+  
+  # Template datasets for video editing training
+  templates:
+    mixkit:
+      url: "https://mixkit.co"
+      description: "Free Premiere Pro and After Effects templates"
+      categories: ["intros", "transitions", "effects", "lower_thirds", "titles"]
+      formats: ["aep", "prproj", "mogrt"]
+    videezy:
+      url: "https://videezy.com"
+      description: "Free video templates and motion graphics"
+      categories: ["motion_graphics", "video_templates", "overlays"]
+      formats: ["aep", "prproj", "mov", "mp4"]
+    capcut_templates:
+      description: "TikTok-style editing templates including phonk beats"
+      categories: ["transitions", "effects", "beat_sync", "phonk", "viral_edits"]
+      source: "capcut_api"
+    motion_array_free:
+      url: "https://motionarray.com/browse/free"
+      description: "Professional-grade free templates"
+      categories: ["premiere_pro", "after_effects", "davinci_resolve"]
+    canva_video:
+      url: "https://canva.com/video-templates"
+      description: "Simple video templates with text overlays"
+      categories: ["text_animations", "social_media", "presentations"]
+    youtube_creator_packs:
+      description: "Community-contributed template packs"
+      sources: ["youtube_descriptions", "creator_channels", "github_repos"]
+  
+  # Stock footage for template pairing
+  stock_footage:
+    pixabay:
+      url: "https://pixabay.com/videos"
+      description: "Free stock video clips"
+    pexels:
+      url: "https://pexels.com/videos"  
+      description: "Free stock videos"
+    videvo:
+      url: "https://videvo.net"
+      description: "Free stock footage and motion graphics"
 
 evaluation:
   benchmarks:

@@ -15,11 +15,15 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent))
 
 from utils.model_downloader import ModelDownloader, auto_download_models
-from utils.dataset_downloader import DatasetAutoDownloader, auto_download_datasets
+from utils.dataset_downloader import DatasetDownloader, auto_download_datasets
 from utils.data_loader import VideoEditingDataset, MultiModalDataLoader
-from training.trainer import MultiPhaseTrainer
+from training.trainer import MultiModalTrainer as MultiPhaseTrainer
 from models.expert_models import ExpertModels
 from utils.metrics import VideoEditingMetrics
+# Import the new template dataset manager
+from utils.template_dataset_manager import TemplateDatasetManager
+# Import the synthetic data generator
+from generation.synthetic_data_generator import SyntheticDataGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +41,25 @@ class TrainingOrchestrator:
             cache_dir=self.config.get('model_cache_dir', 'models/cache')
         )
         
-        self.dataset_downloader = DatasetAutoDownloader(
+        self.dataset_downloader = DatasetDownloader(
             data_root=self.config.get('data_root', 'data/datasets')
+        )
+
+        # Template dataset manager for templates and stock footage
+        self.template_dataset_manager = TemplateDatasetManager(
+            data_root="data/templates"
+        )
+        
+        # Synthetic data generator using teacher models
+        self.synthetic_data_generator = SyntheticDataGenerator(
+            config=self.config
         )
         
         # Training state
         self.setup_complete = False
         self.models_ready = False
         self.datasets_ready = False
+        self.synthetic_data_ready = False
         
         # Results tracking
         self.training_results = {}
@@ -131,6 +146,20 @@ class TrainingOrchestrator:
             if not datasets_success:
                 logger.error("❌ Dataset download failed")
                 return {"status": "failed", "stage": "datasets"}
+
+            # Step 3b: Download and process template datasets (Mixkit, CapCut, etc.)
+            logger.info("📦 Downloading and processing template datasets (Mixkit, CapCut, etc.) ...")
+            template_results = self.template_dataset_manager.download_all_template_datasets()
+            logger.info(f"Template dataset results: {template_results}")
+            # Optionally, validate template dataset stats
+            template_stats = self.template_dataset_manager.get_dataset_stats()
+            logger.info(f"Template dataset stats: {template_stats}")
+            
+            # Step 3c: Generate synthetic data using teacher models + templates + stock footage
+            logger.info("🎬 Generating synthetic training data using teacher models...")
+            synthetic_success = self.generate_synthetic_training_data()
+            if not synthetic_success:
+                logger.warning("⚠️ Synthetic data generation failed, continuing with existing data")
             
             # Step 4: Run training phases
             training_success = self.run_training_phases()
@@ -262,6 +291,62 @@ class TrainingOrchestrator:
             logger.error(f"❌ Dataset download/validation failed: {e}")
             return False
     
+    def generate_synthetic_training_data(self) -> bool:
+        """
+        Generate synthetic training data using teacher models, templates, and stock footage
+        """
+        logger.info("🎯 Starting synthetic data generation pipeline...")
+        
+        try:
+            # Determine number of synthetic samples based on config
+            num_samples = self.config.get('synthetic_data', {}).get('num_samples', 1000)
+            
+            logger.info(f"🎬 Generating {num_samples} synthetic training samples...")
+            
+            # Generate synthetic dataset
+            generation_results = self.synthetic_data_generator.generate_synthetic_dataset(num_samples)
+            
+            # Validate generation results
+            total_generated = sum(len(samples) for samples in generation_results.values())
+            
+            if total_generated > 0:
+                logger.info(f"✅ Successfully generated {total_generated} synthetic samples")
+                logger.info("📊 Generation breakdown:")
+                for sample_type, samples in generation_results.items():
+                    logger.info(f"  - {sample_type}: {len(samples)} samples")
+                
+                # Update training data paths to include synthetic data
+                self._update_training_paths_with_synthetic_data()
+                
+                self.synthetic_data_ready = True
+                return True
+            else:
+                logger.warning("⚠️ No synthetic samples were generated")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Synthetic data generation failed: {e}")
+            return False
+    
+    def _update_training_paths_with_synthetic_data(self):
+        """Update config to include synthetic data paths"""
+        synthetic_dir = "data/synthetic"
+        
+        # Add synthetic data to datasets list
+        if 'synthetic' not in self.config.data.datasets:
+            self.config.data.datasets.append('synthetic')
+            
+        # Update data paths
+        if not hasattr(self.config, 'synthetic_data'):
+            from omegaconf import OmegaConf
+            self.config.synthetic_data = OmegaConf.create({
+                'data_dir': synthetic_dir,
+                'metadata_file': f"{synthetic_dir}/synthetic_dataset_metadata.json",
+                'enabled': True
+            })
+            
+        logger.info(f"📂 Updated training config to include synthetic data from: {synthetic_dir}")
+    
     def run_training_phases(self) -> bool:
         """Run the complete multi-phase training"""
         
@@ -391,11 +476,21 @@ class TrainingOrchestrator:
         
         try:
             # Create dataset
+            # Merge template-based and teacher-generated data for distillation
+            # (Assume VideoEditingDataset can take a list of extra template pairs)
+            template_pairs_path = "data/templates/metadata/training_pairs.json"
+            extra_template_pairs = []
+            if os.path.exists(template_pairs_path):
+                import json
+                with open(template_pairs_path, "r") as f:
+                    extra_template_pairs = json.load(f)
+
             dataset = VideoEditingDataset(
                 data_dir=self.config.data_root,
                 datasets=self.config.data.datasets,
                 max_frames=self.config.data.get('max_samples_per_dataset', 1000),
-                frame_sample_rate=2
+                frame_sample_rate=2,
+                template_pairs=extra_template_pairs
             )
             
             # Split dataset

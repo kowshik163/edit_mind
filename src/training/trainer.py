@@ -12,11 +12,11 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 import logging
 
-from ..core.hybrid_ai import HybridVideoAI
-from ..distillation.distiller import KnowledgeDistiller
-from ..learning.rlhf_trainer import RLHFTrainer
-from ..utils.metrics import VideoEditingMetrics
-from ..utils.data_loader import MultiModalDataLoader
+from core.hybrid_ai import HybridVideoAI
+from distillation.distiller import KnowledgeDistiller
+from learning.enhanced_rlhf_trainer import EnhancedRLHFTrainer as RLHFTrainer
+from utils.metrics import VideoEditingMetrics
+from utils.data_loader import MultiModalDataLoader
 
 logger = logging.getLogger(__name__)
 

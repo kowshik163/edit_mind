@@ -68,6 +68,48 @@ class ModelDownloader:
                     "openai/whisper-base"
                 ],
                 "type": "audio"
+            },
+            # New advanced video generation models
+            "wan_video": {
+                "primary": "alibaba-pai/wan-2.2",
+                "fallbacks": [
+                    "alibaba-pai/wan-2.1", 
+                    "alibaba-pai/wan-2.0"
+                ],
+                "type": "video_generation",
+                "description": "Alibaba's Wan series video generation models"
+            },
+            "mochi_video": {
+                "primary": "genmo/mochi-1", 
+                "fallbacks": [
+                    "genmo/mochi-preview"
+                ],
+                "type": "video_generation",
+                "description": "Genmo's Mochi video generation model"
+            },
+            "ltx_video": {
+                "primary": "lightricks/ltx-video",
+                "fallbacks": [
+                    "lightricks/ltx-video-base"
+                ],
+                "type": "video_generation", 
+                "description": "Lightricks LTX-Video model"
+            },
+            "hunyuan_video": {
+                "primary": "tencent/hunyuan-video",
+                "fallbacks": [
+                    "tencent/hunyuan-video-base"
+                ],
+                "type": "video_generation",
+                "description": "Tencent HunyuanVideo model"
+            },
+            "videocrafter": {
+                "primary": "VideoCrafter/VideoCrafter1",
+                "fallbacks": [
+                    "VideoCrafter/VideoCrafter-base"
+                ],
+                "type": "video_generation",
+                "description": "VideoCrafter video generation model"
             }
         }
         

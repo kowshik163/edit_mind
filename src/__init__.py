@@ -11,13 +11,14 @@ __author__ = "Auto Editor Team"
 __email__ = "team@auto-editor.ai"
 
 from .core.hybrid_ai import HybridVideoAI
-from .core.orchestrator import ModelOrchestrator
+from .training.training_orchestrator import TrainingOrchestrator
+from .core.cli import CLIInterface
 from .training.trainer import MultiModalTrainer
 from .distillation.distiller import KnowledgeDistiller
 
 __all__ = [
     "HybridVideoAI",
-    "ModelOrchestrator", 
+    "TrainingOrchestrator", 
     "MultiModalTrainer",
     "KnowledgeDistiller",
 ]
