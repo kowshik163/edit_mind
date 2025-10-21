@@ -54,11 +54,21 @@ class MultiModalTrainer:
         self.data_loader = MultiModalDataLoader(config)
         
         # Experiment tracking
-        if config.logging.get('use_wandb', True):
+        logging_cfg = config.logging if hasattr(config, 'logging') and isinstance(config.logging, (dict, DictConfig)) else {}
+        if getattr(logging_cfg, 'get', None):
+            use_wandb = logging_cfg.get('use_wandb', True)
+            wandb_project = logging_cfg.get('wandb_project', 'auto-editor')
+            experiment_name = logging_cfg.get('experiment_name', 'default')
+        else:
+            use_wandb = True
+            wandb_project = 'auto-editor'
+            experiment_name = 'default'
+        if use_wandb:
             wandb.init(
-                project=config.logging.wandb_project,
-                name=config.logging.experiment_name,
-                config=dict(config)
+                project=wandb_project,
+                name=experiment_name,
+                config=dict(config),
+                reinit=True
             )
         
         self.global_step = 0

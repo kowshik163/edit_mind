@@ -70,10 +70,19 @@ def main():
         logger.info("📋 Loading configuration...")
         config = load_config(args.config)
         
+        # Verify config is properly loaded
+        if not hasattr(config, 'get'):
+            logger.error(f"❌ Config is not a proper dict-like object: {type(config)}")
+            sys.exit(1)
+        
         # Setup data directories
-        data_dir = Path(config.get('data_dir', 'data'))
-        output_dir = Path(config.get('output_dir', 'output'))
-        checkpoints_dir = Path(config.get('checkpoints_dir', 'checkpoints'))
+        paths_config = config.get('paths', {})
+        if not isinstance(paths_config, dict) or not hasattr(paths_config, 'get'):
+            logger.warning(f"⚠️  paths config is not a proper dict-like object: {type(paths_config)}, using defaults")
+            paths_config = {}
+        data_dir = Path(paths_config.get('data_dir', 'data'))
+        output_dir = Path(paths_config.get('output_dir', 'output'))
+        checkpoints_dir = Path(paths_config.get('checkpoints_dir', 'checkpoints'))
         
         # Create directories if they don't exist
         for directory in [data_dir, output_dir, checkpoints_dir]:

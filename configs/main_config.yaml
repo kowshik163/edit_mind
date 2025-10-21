@@ -7,6 +7,7 @@ paths:
   cache_dir: ./cache
   data_dir: ./datasets
   output_dir: ./outputs
+  checkpoints_dir: ./checkpoints
 
 teachers:
   text_model: zai-org/GLM-4.5  # Replaced with a top-performing, open-source agentic LLM.

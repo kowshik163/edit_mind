@@ -24,18 +24,28 @@ def load_config(config_path: Union[str, Path]) -> DictConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     
-    # Load YAML config
-    with open(config_path, 'r') as f:
-        config_dict = yaml.safe_load(f)
-    
-    # Convert to OmegaConf DictConfig
-    config = OmegaConf.create(config_dict)
-    
-    # Resolve any variable interpolations
-    config = OmegaConf.to_container(config, resolve=True)
-    config = OmegaConf.create(config)
-    
-    return config
+    try:
+        # Load YAML config
+        with open(config_path, 'r') as f:
+            config_dict = yaml.safe_load(f)
+        
+        if config_dict is None:
+            raise ValueError(f"Empty or invalid YAML file: {config_path}")
+        
+        if not isinstance(config_dict, dict):
+            raise ValueError(f"YAML file must contain a dictionary, got {type(config_dict)}: {config_path}")
+        
+        # Convert to OmegaConf DictConfig
+        config = OmegaConf.create(config_dict)
+        
+        # Validate that the config is properly created
+        if not hasattr(config, 'get'):
+            raise ValueError(f"Failed to create proper DictConfig object from {config_path}")
+        
+        return config
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to load config from {config_path}: {e}")
 
 
 def save_config(config: DictConfig, save_path: Union[str, Path]):

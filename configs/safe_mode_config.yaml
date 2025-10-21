@@ -20,6 +20,16 @@ students:
   audio_models:
     - openai/whisper-tiny
 
+# Model architecture configuration
+model:
+  text_dim: 768
+  vision_dim: 768
+  audio_dim: 768
+  fusion_dim: 1024
+  hidden_dim: 2048
+  num_attention_heads: 16
+  num_layers: 12
+
 # Disable or minimize complex training phases
 distillation:
   strategies:
