@@ -51,10 +51,11 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Data and models
+# Data directories (not source code)
 data/raw/
 data/processed/
 data/datasets/
+# Large video/audio files (but keep small test samples)
 *.mp4
 *.avi
 *.mov
@@ -68,13 +69,16 @@ data/datasets/
 
 # Outputs
 output/
+outputs/
 experiments/
 logs/
 wandb/
 
-# Checkpoints
+# Checkpoints and saved model files (not source code)
 checkpoints/
-models/
+/models/
+saved_models/
+pretrained_models/
 *.safetensors
 
 # Temporary files
