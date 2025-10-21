@@ -41,6 +41,16 @@ students:
     - AudioMAE/audio-mae-small
   fusion_model: llava-hf/llava-v1.6-mistral-7b
 
+# Model architecture configuration
+model:
+  text_dim: 768
+  vision_dim: 768
+  audio_dim: 768
+  fusion_dim: 1024
+  hidden_dim: 2048
+  num_attention_heads: 16
+  num_layers: 12
+
 distillation:
   strategies:
     - feature_matching   # Align internal embeddings

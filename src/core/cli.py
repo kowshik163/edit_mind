@@ -3,6 +3,7 @@ Command Line Interface for Autonomous Video Editor
 """
 
 import typer
+import click
 import logging
 from pathlib import Path
 from typing import Optional, List
@@ -32,7 +33,7 @@ def edit(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output video path"),
     model: Path = typer.Option("checkpoints/best_model.pt", "--model", "-m", help="Model checkpoint"),
     style: Optional[str] = typer.Option(None, "--style", "-s", help="Editing style", 
-                                       click_type=typer.Choice(["amv", "cinematic", "tiktok", "trailer", "sports", "phonk"])),
+                                       click_type=click.Choice(["amv", "cinematic", "tiktok", "trailer", "sports", "phonk"])),
     config: Path = typer.Option("configs/main_config.yaml", "--config", "-c", help="Config file")
 ):
     """
@@ -143,7 +144,7 @@ def edit(
 def train(
     config: Path = typer.Option("configs/main_config.yaml", "--config", "-c", help="Config file"),
     phase: str = typer.Option("all", "--phase", "-p", help="Training phase",
-                             click_type=typer.Choice(["all", "pretraining", "distillation", "finetuning", "rlhf", "autonomous"])),
+                             click_type=click.Choice(["all", "pretraining", "distillation", "finetuning", "rlhf", "autonomous"])),
     resume: Optional[Path] = typer.Option(None, "--resume", "-r", help="Resume from checkpoint"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
 ):

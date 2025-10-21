@@ -47,7 +47,7 @@ class HybridVideoAI(nn.Module):
         self._ensure_models_available()
         
         # Initialize tokenizer - Use teacher model for better capabilities
-        model_name = config.get('teachers', {}).get('text_model', config['model'].get('backbone', 'meta-llama/Llama-2-7b-hf'))
+        model_name = config.get('teachers', {}).get('text_model', 'meta-llama/Llama-2-7b-hf')
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
@@ -102,7 +102,7 @@ class HybridVideoAI(nn.Module):
             logger.info(f"✅ Loaded advanced vision model: {vision_model}")
         except Exception as e:
             logger.warning(f"Failed to load SigLIP, using CLIP fallback: {e}")
-            vision_model = config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32')
+            vision_model = config.get('teachers', {}).get('vision_encoder', 'openai/clip-vit-base-patch32')
             self.vision_encoder = CLIPVisionModel.from_pretrained(
                 vision_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
@@ -131,12 +131,13 @@ class HybridVideoAI(nn.Module):
         )
         
         # Multimodal fusion layer
+        model_config = config.get('model', {})
         self.fusion_module = MultiModalFusionModule(
-            text_dim=config['model']['text_dim'],
-            vision_dim=config['model']['vision_dim'], 
-            audio_dim=config['model']['audio_dim'],
-            fusion_dim=config['model']['fusion_dim'],
-            num_heads=config['model']['num_attention_heads']
+            text_dim=model_config.get('text_dim', 768),
+            vision_dim=model_config.get('vision_dim', 768), 
+            audio_dim=model_config.get('audio_dim', 768),
+            fusion_dim=model_config.get('fusion_dim', 1024),
+            num_heads=model_config.get('num_attention_heads', 16)
         )
         
         # Self-coding engine for dynamic effect generation
@@ -152,13 +153,13 @@ class HybridVideoAI(nn.Module):
         
         # Video understanding module
         self.video_understanding = VideoUnderstandingModule(
-            fusion_dim=config['model']['fusion_dim'],
-            hidden_dim=config['model']['hidden_dim']
+            fusion_dim=model_config.get('fusion_dim', 1024),
+            hidden_dim=model_config.get('hidden_dim', 2048)
         )
         
         # Editing planner 
         self.editing_planner = EditingPlannerModule(
-            hidden_dim=config['model']['hidden_dim'],
+            hidden_dim=model_config.get('hidden_dim', 2048),
             vocab_size=len(self.tokenizer)
         )
         
@@ -182,9 +183,9 @@ class HybridVideoAI(nn.Module):
         """Ensure all required models are downloaded and available"""
         try:
             # Get model names from config
-            backbone_model = self.config['model'].get('backbone', 'microsoft/DialoGPT-small')
-            vision_model = self.config['model'].get('vision_encoder', 'openai/clip-vit-base-patch32') 
-            audio_model = self.config['model'].get('audio_encoder', 'openai/whisper-tiny')
+            backbone_model = self.config.get('teachers', {}).get('text_model', 'microsoft/DialoGPT-small')
+            vision_model = self.config.get('teachers', {}).get('vision_encoder', 'openai/clip-vit-base-patch32') 
+            audio_model = self.config.get('teachers', {}).get('audio_models', ['openai/whisper-tiny'])[0]
             
             # Auto-download models using the model downloader
             model_downloader = ModelDownloader(
@@ -193,14 +194,8 @@ class HybridVideoAI(nn.Module):
             
             logger.info("Ensuring required models are available...")
             
-            # Download backbone model
-            model_downloader.download_model(backbone_model, model_type='language')
-            
-            # Download vision model  
-            model_downloader.download_model(vision_model, model_type='vision')
-            
-            # Download audio model
-            model_downloader.download_model(audio_model, model_type='audio')
+            # Download all models with fallback handling
+            model_downloader.download_all_models()
             
             logger.info("All required models are available")
             
