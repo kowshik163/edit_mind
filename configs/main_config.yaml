@@ -52,6 +52,39 @@ model:
   num_attention_heads: 16
   num_layers: 12
 
+# Training configuration
+training:
+  batch_size: 8
+  
+  # Phase 1: Fusion Pretraining
+  phase1:
+    num_epochs: 3
+    learning_rate: 1e-4
+    weight_decay: 0.01
+    gradient_accumulation_steps: 2
+    warmup_steps: 100
+    
+  # Phase 2: Knowledge Distillation  
+  phase2:
+    num_epochs: 3
+    learning_rate: 3e-5
+    weight_decay: 0.01
+    gradient_accumulation_steps: 4
+    
+  # Phase 3: Editing Fine-tuning
+  phase3:
+    num_epochs: 5
+    learning_rate: 1e-5
+    weight_decay: 0.01
+    gradient_accumulation_steps: 8
+
+# Data configuration
+data:
+  max_frames: 32
+  max_audio_length: 160000
+  frame_sample_rate: 2
+  num_workers: 4
+
 distillation:
   strategies:
     - feature_matching   # Align internal embeddings

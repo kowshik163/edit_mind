@@ -351,17 +351,16 @@ class MultiModalDataLoader:
         """Get training data loader"""
         dataset = VideoEditingDataset(
             data_dir=data_dir,
-            config=self.config,
             split="train",
-            max_frames=self.config.data.get('max_frames', 32),
-            max_audio_length=self.config.data.get('max_audio_length', 160000)
+            max_frames=self.config.data.get('max_frames', 32) if hasattr(self.config, 'data') else 32,
+            max_audio_length=self.config.data.get('max_audio_length', 160000) if hasattr(self.config, 'data') else 160000
         )
         
         return data.DataLoader(
             dataset,
-            batch_size=self.config.training.batch_size,
+            batch_size=int(self.config.training.batch_size),
             shuffle=True,
-            num_workers=self.config.data.get('num_workers', 4),
+            num_workers=int(self.config.data.get('num_workers', 4)) if hasattr(self.config, 'data') else 4,
             pin_memory=True,
             drop_last=True
         )
@@ -370,17 +369,16 @@ class MultiModalDataLoader:
         """Get validation data loader"""
         dataset = VideoEditingDataset(
             data_dir=data_dir,
-            config=self.config,
             split="val",
-            max_frames=self.config.data.get('max_frames', 32),
-            max_audio_length=self.config.data.get('max_audio_length', 160000)
+            max_frames=self.config.data.get('max_frames', 32) if hasattr(self.config, 'data') else 32,
+            max_audio_length=self.config.data.get('max_audio_length', 160000) if hasattr(self.config, 'data') else 160000
         )
         
         return data.DataLoader(
             dataset,
-            batch_size=self.config.training.batch_size,
+            batch_size=int(self.config.training.batch_size),
             shuffle=False,
-            num_workers=self.config.data.get('num_workers', 4),
+            num_workers=int(self.config.data.get('num_workers', 4)) if hasattr(self.config, 'data') else 4,
             pin_memory=True
         )
 

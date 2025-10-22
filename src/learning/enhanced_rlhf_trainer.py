@@ -10,6 +10,7 @@ import logging
 import json
 import random
 import math
+from trl.trainer.ppo_config import PPOConfig
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Union
 from omegaconf import DictConfig
@@ -290,19 +291,17 @@ class EnhancedRLHFTrainer:
     
     def _setup_ppo_config(self) -> PPOConfig:
         """Setup PPO configuration"""
-        return PPOConfig(
-            model_name=self.config.get('model_name', 'microsoft/DialoGPT-small'),
-            learning_rate=self.config.get('learning_rate', 1e-5),
-            batch_size=self.config.get('batch_size', 8),
-            mini_batch_size=self.config.get('mini_batch_size', 4),
-            ppo_epochs=self.config.get('ppo_epochs', 4),
-            cliprange=self.config.get('clip_epsilon', 0.2),
-            vf_coef=self.config.get('vf_coef', 0.1),
-            ent_coef=self.config.get('ent_coef', 0.01),
-            max_grad_norm=self.config.get('max_grad_norm', 1.0),
-            gamma=self.config.get('gamma', 0.99),
-            lam=self.config.get('lam', 0.95)
-        )
+        try:
+            # Try with common parameters
+            return PPOConfig(
+                learning_rate=self.config.get('learning_rate', 1e-5),
+                batch_size=self.config.get('batch_size', 8),
+                mini_batch_size=self.config.get('mini_batch_size', 4)
+            )
+        except TypeError as e:
+            logger.warning(f"PPOConfig parameters error: {e}, using minimal config")
+            # Fallback to minimal configuration
+            return PPOConfig()
     
     def train_reward_model(self, preference_data: List[EditingPreference]) -> Dict[str, float]:
         """Train the reward model on collected preferences"""

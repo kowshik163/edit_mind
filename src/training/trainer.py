@@ -107,24 +107,24 @@ class MultiModalTrainer:
         self.model.set_training_phase("pretraining")
         
         # Get pretraining data
-        train_loader = self.data_loader.get_pretraining_loader()
-        val_loader = self.data_loader.get_validation_loader()
+        train_loader = self.data_loader.get_train_loader('data')
+        val_loader = self.data_loader.get_val_loader('data')
         
-        # Setup optimizer
+        # Setup optimizer with proper type conversion
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.config.training.phase1.learning_rate,
-            weight_decay=self.config.training.phase1.weight_decay
+            lr=float(self.config.training.phase1.learning_rate),
+            weight_decay=float(self.config.training.phase1.weight_decay)
         )
         
         scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer,
             start_factor=0.1,
-            total_iters=self.config.training.phase1.warmup_steps
+            total_iters=int(self.config.training.phase1.warmup_steps)
         )
         
         # Training loop
-        for epoch in range(self.config.training.phase1.num_epochs):
+        for epoch in range(int(self.config.training.phase1.num_epochs)):
             self.current_epoch = epoch
             
             # Training
@@ -152,7 +152,7 @@ class MultiModalTrainer:
                 # Backward pass
                 loss.backward()
                 
-                if (batch_idx + 1) % self.config.training.phase1.gradient_accumulation_steps == 0:
+                if (batch_idx + 1) % int(self.config.training.phase1.gradient_accumulation_steps) == 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     optimizer.step()
                     scheduler.step()
@@ -203,8 +203,8 @@ class MultiModalTrainer:
         self.model.set_training_phase("editing_finetuning")
         
         # Get editing data
-        train_loader = self.data_loader.get_editing_loader()
-        val_loader = self.data_loader.get_validation_loader()
+        train_loader = self.data_loader.get_train_loader('data')
+        val_loader = self.data_loader.get_val_loader('data')
         
         # Setup optimizer for LoRA parameters only
         optimizer = torch.optim.AdamW(
