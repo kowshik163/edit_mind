@@ -9,6 +9,13 @@ paths:
   output_dir: ./outputs
   checkpoints_dir: ./checkpoints
 
+#directory
+model_cache_dir: ./models/cache
+data_root: ./data
+output_dir: ./outputs
+checkpoint_dir: ./checkpoints
+log_dir: ./logs
+
 teachers:
   text_model: zai-org/GLM-4.5  # Replaced with a top-performing, open-source agentic LLM.
   video_model: OpenGVLab/InternVideo2-Large

@@ -1,142 +1,125 @@
-project_name: autonomous_video_editor_test_run
+checkpoint_dir: ./checkpoints
+data:
+  datasets: []  # Skip external dataset downloads for safe mode
+  frame_sample_rate: 2
+  max_audio_length: 160000
+  max_frames: 8  # Reduced for safe mode to avoid tensor size mismatches
+  num_workers: 2
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+data_root: ./data
+datasets:
+  synthetic_samples:
+    enabled: true
+    num_samples: 50
+    output_dir: ./data/synthetic_samples
+  stock_footage:
+    enabled: false
+  templates:
+    enabled: false
+synthetic_data:
+  enabled: true
+  num_samples: 50
+  data_dir: ./data/synthetic_samples
+  video:
+    - synthetic_samples  # Only use synthetic data
+  audio: []
+  text: []
+  multimodal: []
 description: Minimal configuration for testing the pipeline on a local machine.
-
-paths:
-  cache_dir: ./cache
-  data_dir: ./data/synthetic_samples  # Point to the local data we will create
-  output_dir: ./outputs
-
-# Use small, widely available models instead of massive ones
-teachers:
-  text_model: microsoft/DialoGPT-small
-  video_model: openai/clip-vit-base-patch32
-  audio_models:
-    - openai/whisper-tiny
-  code_generation: codellama/CodeLlama-7b-hf # Smallest CodeLlama
-
-students:
-  text_model: microsoft/DialoGPT-small
-  video_model: openai/clip-vit-base-patch32
-  audio_models:
-    - openai/whisper-tiny
-
-# Model architecture configuration
+distillation:
+  alpha: 0.5
+  batch_size: 1
+  learning_rate: 1e-5
+  strategies:
+  - feature_matching
+  temperature: 2.0
+evaluation:
+  metrics:
+  - bleu
+  - rouge
+finetuning:
+  eval_every: 50
+  gradient_accumulation: 1
+  max_epochs: 1
+  method: qlora
+  save_every: 100
+log_dir: ./logs
+logging:
+  experiment_name: safe-mode-test
+  log_level: INFO
+  log_to_file: true
+  use_wandb: false
+  wandb_project: auto-editor-test
 model:
-  text_dim: 768
-  vision_dim: 768
-  audio_dim: 768
+  audio_dim: 384
   fusion_dim: 1024
   hidden_dim: 2048
   num_attention_heads: 16
   num_layers: 12
-# Training configuration
-training:
-  batch_size: 8
-  
-  # Phase 1: Fusion Pretraining
-  phase1:
-    num_epochs: 3
-    learning_rate: 1e-4
-    weight_decay: 0.01
-    gradient_accumulation_steps: 2
-    warmup_steps: 100
-    
-  # Phase 2: Knowledge Distillation  
-  phase2:
-    num_epochs: 3
-    learning_rate: 3e-5
-    weight_decay: 0.01
-    gradient_accumulation_steps: 4
-    
-  # Phase 3: Editing Fine-tuning
-  phase3:
-    num_epochs: 5
-    learning_rate: 1e-5
-    weight_decay: 0.01
-    gradient_accumulation_steps: 8
-
-# Data configuration
-data:
-  max_frames: 32
-  max_audio_length: 160000
-  frame_sample_rate: 2
-
-# Disable or minimize complex training phases
-distillation:
-  strategies:
-    - feature_matching
-  temperature: 2.0
-  alpha: 0.5
-  batch_size: 1 # Use a batch size of 1 for minimal memory usage
-  learning_rate: 1e-5
-
-# Training configuration for safe mode
-training:
-  # Training configuration
-  batch_size: 8
-
-  # Phase 1: Fusion Pretraining
-  phase1:
-    num_epochs: 3
-    learning_rate: 1e-4
-    weight_decay: 0.01
-    gradient_accumulation_steps: 2
-    warmup_steps: 100
-
-  # Phase 2: Knowledge Distillation
-  phase2:
-    num_epochs: 3
-    learning_rate: 3e-5
-    weight_decay: 0.01
-    gradient_accumulation_steps: 4
-
-  # Phase 3: Editing Fine-tuning
-  phase3:
-    num_epochs: 5
-    learning_rate: 1e-5
-    weight_decay: 0.01
-    gradient_accumulation_steps: 8
-  
-  phases: ['pretrain', 'distill']  # Skip complex phases for safe mode
-  batch_size: 2
-  learning_rate: 1e-4
-  num_epochs: 1
-  gradient_accumulation_steps: 1
-  warmup_steps: 10
-  eval_steps: 10
-  save_steps: 20
-  max_grad_norm: 1.0
-
-# Data configuration for safe mode  
-data:
-  datasets: []  # Start with no datasets, use synthetic only
-  max_samples_per_dataset: 50
-  train_split: 0.8
-  val_split: 0.1
-  test_split: 0.1
-  num_workers: 1
-
-finetuning:
-  method: qlora
-  max_epochs: 1
-  gradient_accumulation: 1
-  save_every: 100
-  eval_every: 50
-
-# Disable RLHF and Self-Coding for the test run
+  text_dim: 768
+  vision_dim: 512
+model_cache_dir: ./models/cache
+output_dir: ./outputs
+paths:
+  cache_dir: ./cache
+  checkpoints_dir: ./checkpoints
+  data_dir: ./data/synthetic_samples
+  output_dir: ./outputs
+project_name: autonomous_video_editor_test_run
 rlhf:
   enabled: false
+safe_mode:
+  eval_steps: 10
+  max_grad_norm: 1.0
+  max_samples_per_dataset: 50
+  phases:
+  - pretrain
+  - distill
+  save_steps: 20
+  test_split: 0.1
+  train_split: 0.8
+  val_split: 0.1
 self_coding:
   enabled: false
-
-# Crucially, remove all large online datasets
-datasets:
-  templates:
-    enabled: false
-  stock_footage:
-    enabled: false
-
-evaluation:
-  metrics:
-    - bleu
-    - rouge
+students:
+  audio_models:
+  - openai/whisper-tiny
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+system:
+  checkpoint_every: 100
+  compile_model: false
+  device: auto
+  max_memory_gb: 8
+  mixed_precision: false
+  num_workers: 2
+  dataloader_pin_memory: false
+teachers:
+  audio_models:
+  - openai/whisper-tiny
+  code_generation: codellama/CodeLlama-7b-hf
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+training:
+  batch_size: 2  # Reduced batch size for safe mode
+  phases:
+  - pretrain
+  - distill
+  phase1:
+    gradient_accumulation_steps: 2
+    learning_rate: 1e-4
+    num_epochs: 3
+    warmup_steps: 100
+    weight_decay: 0.01
+  phase2:
+    gradient_accumulation_steps: 4
+    learning_rate: 3e-5
+    num_epochs: 3
+    weight_decay: 0.01
+  phase3:
+    gradient_accumulation_steps: 8
+    learning_rate: 1e-5
+    num_epochs: 5
+    weight_decay: 0.01

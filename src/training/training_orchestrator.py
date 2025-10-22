@@ -19,6 +19,7 @@ from utils.dataset_downloader import DatasetDownloader, auto_download_datasets
 from utils.data_loader import VideoEditingDataset, MultiModalDataLoader
 from training.trainer import MultiModalTrainer as MultiPhaseTrainer
 from models.expert_models import ExpertModels
+from core.hybrid_ai import HybridVideoAI
 from utils.metrics import VideoEditingMetrics
 # Import the new template dataset manager
 from utils.template_dataset_manager import TemplateDatasetManager
@@ -266,9 +267,25 @@ class TrainingOrchestrator:
         logger.info("📊 Downloading and validating datasets...")
         
         try:
-            # Download datasets
+            # Check if we need to download datasets
+            datasets_to_download = self.config.data.datasets or []
+            
+            if not datasets_to_download:
+                logger.info("📋 No external datasets to download - using existing/synthetic data")
+                # Check if synthetic data exists
+                synthetic_dir = Path("./data/synthetic_samples")
+                if synthetic_dir.exists() and list(synthetic_dir.glob("sample_*")):
+                    logger.info(f"✅ Found existing synthetic data in {synthetic_dir}")
+                    self.datasets_ready = True
+                    return True
+                else:
+                    logger.info("🎬 No existing synthetic data found - will generate during synthetic phase")
+                    self.datasets_ready = True  # Mark as ready, will generate synthetic data later
+                    return True
+            
+            # Download datasets if requested
             download_results = self.dataset_downloader.download_all_datasets(
-                datasets=self.config.data.datasets,
+                datasets=datasets_to_download,
                 force_download=force_download
             )
             
@@ -357,8 +374,12 @@ class TrainingOrchestrator:
         logger.info("🎯 Starting multi-phase training...")
         
         try:
-            # Initialize trainer
-            trainer = MultiPhaseTrainer(self.config)
+            # Initialize the HybridVideoAI model
+            logger.info("🤖 Initializing HybridVideoAI model...")
+            model = HybridVideoAI(self.config)
+            
+            # Initialize trainer with model
+            trainer = MultiPhaseTrainer(self.config, model)
             
             # Create data loaders
             train_loader, val_loader = self._create_data_loaders()
@@ -371,15 +392,15 @@ class TrainingOrchestrator:
                 
                 try:
                     if phase == "pretrain":
-                        result = trainer.pretrain(train_loader, val_loader)
+                        result = trainer.phase1_fusion_pretraining()
                     elif phase == "distill":
-                        result = trainer.distill(train_loader, val_loader)
+                        result = trainer.phase2_distillation()
                     elif phase == "finetune":
-                        result = trainer.finetune(train_loader, val_loader)
+                        result = trainer.phase3_editing_finetuning()
                     elif phase == "rlhf":
-                        result = trainer.rlhf(train_loader, val_loader)
+                        result = trainer.phase4_self_improvement()
                     elif phase == "autonomous":
-                        result = trainer.autonomous_training(train_loader, val_loader)
+                        result = trainer.phase5_autonomous_integration()
                     else:
                         logger.warning(f"Unknown training phase: {phase}")
                         continue
