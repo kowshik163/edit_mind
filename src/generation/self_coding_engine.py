@@ -1161,12 +1161,15 @@ def """
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             
+            # Determine dtype based on device availability
+            model_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            
             # Load model with optimization
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=model_dtype,
                 device_map="auto" if torch.cuda.is_available() else None,
-                load_in_8bit=True,  # Enable quantization for memory efficiency
+                load_in_8bit=torch.cuda.is_available(),  # Only use 8-bit quantization on GPU
                 trust_remote_code=True,
                 cache_dir=self.config.get('cache_dir', 'models/cache')
             )

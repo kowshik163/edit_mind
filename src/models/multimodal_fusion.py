@@ -99,20 +99,59 @@ class MultiModalFusionModule(nn.Module):
         
         modalities = []
         
-        # Project each modality to common dimension
+        # Project each modality to common dimension and align sequence lengths
+        target_seq_len = None
+        
+        # First pass: determine target sequence length (use the shortest non-None modality)
+        seq_lengths = []
+        if text_emb is not None:
+            seq_lengths.append(text_emb.shape[1])
+        if vision_emb is not None:
+            seq_lengths.append(vision_emb.shape[1])
+        if audio_emb is not None:
+            seq_lengths.append(audio_emb.shape[1])
+        
+        if seq_lengths:
+            target_seq_len = min(seq_lengths)  # Use minimum to avoid padding
+        else:
+            raise ValueError("At least one modality must be provided")
+        
+        # Project and align each modality
         if text_emb is not None:
             text_proj = self.text_proj(text_emb)
             text_proj = self.text_norm(text_proj)
+            # Align sequence length
+            if text_proj.shape[1] > target_seq_len:
+                text_proj = text_proj[:, :target_seq_len, :]
+            elif text_proj.shape[1] < target_seq_len:
+                # Pad with zeros
+                padding = torch.zeros(text_proj.shape[0], target_seq_len - text_proj.shape[1], 
+                                     text_proj.shape[2], device=text_proj.device, dtype=text_proj.dtype)
+                text_proj = torch.cat([text_proj, padding], dim=1)
             modalities.append(('text', text_proj))
             
         if vision_emb is not None:
             vision_proj = self.vision_proj(vision_emb)
             vision_proj = self.vision_norm(vision_proj)
+            # Align sequence length
+            if vision_proj.shape[1] > target_seq_len:
+                vision_proj = vision_proj[:, :target_seq_len, :]
+            elif vision_proj.shape[1] < target_seq_len:
+                padding = torch.zeros(vision_proj.shape[0], target_seq_len - vision_proj.shape[1], 
+                                     vision_proj.shape[2], device=vision_proj.device, dtype=vision_proj.dtype)
+                vision_proj = torch.cat([vision_proj, padding], dim=1)
             modalities.append(('vision', vision_proj))
             
         if audio_emb is not None:
             audio_proj = self.audio_proj(audio_emb)
             audio_proj = self.audio_norm(audio_proj)
+            # Align sequence length
+            if audio_proj.shape[1] > target_seq_len:
+                audio_proj = audio_proj[:, :target_seq_len, :]
+            elif audio_proj.shape[1] < target_seq_len:
+                padding = torch.zeros(audio_proj.shape[0], target_seq_len - audio_proj.shape[1], 
+                                     audio_proj.shape[2], device=audio_proj.device, dtype=audio_proj.dtype)
+                audio_proj = torch.cat([audio_proj, padding], dim=1)
             modalities.append(('audio', audio_proj))
             
         if len(modalities) == 0:
@@ -154,9 +193,11 @@ class MultiModalFusionModule(nn.Module):
                 
             fused_embeddings.append(enhanced_emb)
             
-        # Concatenate all modalities
+        # Instead of concatenating (which creates variable lengths),
+        # average the modality embeddings to create a fixed-size output
         if len(fused_embeddings) > 1:
-            fused = torch.cat(fused_embeddings, dim=1)
+            # Stack and average across modalities
+            fused = torch.stack(fused_embeddings, dim=0).mean(dim=0)
         else:
             fused = fused_embeddings[0]
             

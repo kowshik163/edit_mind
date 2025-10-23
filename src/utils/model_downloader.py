@@ -194,11 +194,14 @@ class ModelDownloader:
         """Download language model"""
         logger.info(f"    📚 Downloading LLM: {model_name}")
         
+        # Determine dtype based on device availability
+        model_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        
         # Try LlamaForCausalLM first, fallback to AutoModel
         try:
             model = LlamaForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=model_dtype,
                 device_map="auto" if torch.cuda.is_available() else None,
                 cache_dir=str(self.cache_dir)
             )

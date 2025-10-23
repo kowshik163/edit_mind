@@ -5,6 +5,7 @@ Combines reasoning, perception, and editing capabilities in a unified model
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import logging
 import os
 import tempfile
@@ -68,13 +69,17 @@ class HybridVideoAI(nn.Module):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
+        # Determine dtype based on device availability and config
+        use_bf16 = torch.cuda.is_available() and config.get('system', {}).get('mixed_precision', False)
+        model_dtype = torch.bfloat16 if use_bf16 else torch.float32
+        
         # Core reasoning backbone - Use advanced teacher model
         try:
             self.language_model = LlamaForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=model_dtype,
                 device_map="auto" if torch.cuda.is_available() else None,
-                load_in_8bit=config.get('quantization', {}).get('load_in_8bit', True),  # Enable 8-bit by default for large models
+                load_in_8bit=config.get('quantization', {}).get('load_in_8bit', False) and torch.cuda.is_available(),  # Only 8-bit on GPU
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
             logger.info(f"✅ Loaded advanced language model: {model_name}")
@@ -114,7 +119,7 @@ class HybridVideoAI(nn.Module):
             self.audio_encoder = WhisperModel.from_pretrained(
                 audio_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache'),
-                torch_dtype=torch.bfloat16
+                torch_dtype=model_dtype
             )
             logger.info(f"✅ Loaded advanced audio model: {audio_model}")
         except Exception as e:
@@ -310,7 +315,20 @@ class HybridVideoAI(nn.Module):
             # Flatten time dimension for vision encoder
             frames_flat = video_frames.view(B * T, C, H, W)
             vision_outputs = self.vision_encoder(pixel_values=frames_flat)
-            vision_embeddings = vision_outputs.last_hidden_state.mean(dim=1)  # Pool
+            
+            # IMPORTANT: Use pooler_output if available (single vector per image),
+            # otherwise use CLS token (first token) or mean pooling
+            if hasattr(vision_outputs, 'pooler_output') and vision_outputs.pooler_output is not None:
+                # This gives us (B*T, vision_dim)
+                vision_embeddings = vision_outputs.pooler_output
+            elif hasattr(vision_outputs, 'last_hidden_state'):
+                # Extract CLS token (first token) instead of mean pooling
+                # This gives consistent dimensionality
+                vision_embeddings = vision_outputs.last_hidden_state[:, 0, :]  # Take CLS token
+            else:
+                raise ValueError("Vision encoder output format not recognized")
+            
+            # Reshape to (B, T, vision_dim)
             vision_embeddings = vision_embeddings.view(B, T, -1)
             outputs['vision_embeddings'] = vision_embeddings
             
@@ -318,20 +336,54 @@ class HybridVideoAI(nn.Module):
         if audio_features is not None:
             # Use Whisper encoder for audio embeddings
             audio_embeddings = self.audio_encoder.encoder(audio_features).last_hidden_state
+            B, audio_seq_len, audio_dim = audio_embeddings.shape
+            
+            # Pool audio embeddings to match video frame count if available
+            if video_frames is not None and 'vision_embeddings' in outputs:
+                T = outputs['vision_embeddings'].shape[1]  # Get actual number of video frames
+                # Use adaptive average pooling to match video frames
+                # Transpose to (B, audio_dim, audio_seq_len) for pooling
+                audio_transposed = audio_embeddings.transpose(1, 2)
+                # Pool to target sequence length T
+                audio_pooled = F.adaptive_avg_pool1d(audio_transposed, T)
+                # Transpose back to (B, T, audio_dim)
+                audio_embeddings = audio_pooled.transpose(1, 2)
+            else:
+                # Use a default target sequence length
+                target_len = 8
+                if audio_seq_len > target_len:
+                    # Use adaptive pooling
+                    audio_transposed = audio_embeddings.transpose(1, 2)
+                    audio_pooled = F.adaptive_avg_pool1d(audio_transposed, target_len)
+                    audio_embeddings = audio_pooled.transpose(1, 2)
             outputs['audio_embeddings'] = audio_embeddings
             
         # Multimodal fusion
         if any(k in outputs for k in ['text_embeddings', 'vision_embeddings', 'audio_embeddings']):
-            fused_embeddings = self.fusion_module(
-                text_emb=outputs.get('text_embeddings'),
-                vision_emb=outputs.get('vision_embeddings'), 
-                audio_emb=outputs.get('audio_embeddings')
-            )
-            outputs['fused_embeddings'] = fused_embeddings
-            
-            # Video understanding
-            video_understanding = self.video_understanding(fused_embeddings)
-            outputs['video_understanding'] = video_understanding
+            try:
+                fused_embeddings = self.fusion_module(
+                    text_emb=outputs.get('text_embeddings'),
+                    vision_emb=outputs.get('vision_embeddings'), 
+                    audio_emb=outputs.get('audio_embeddings')
+                )
+                outputs['fused_embeddings'] = fused_embeddings
+                
+                # Video understanding
+                video_understanding = self.video_understanding(fused_embeddings)
+                outputs['video_understanding'] = video_understanding
+            except RuntimeError as e:
+                # Log shapes for debugging
+                logger.error(f"Error in multimodal fusion or video understanding:")
+                if 'text_embeddings' in outputs:
+                    logger.error(f"  text_embeddings shape: {outputs['text_embeddings'].shape}")
+                if 'vision_embeddings' in outputs:
+                    logger.error(f"  vision_embeddings shape: {outputs['vision_embeddings'].shape}")
+                if 'audio_embeddings' in outputs:
+                    logger.error(f"  audio_embeddings shape: {outputs['audio_embeddings'].shape}")
+                if 'fused_embeddings' in outputs:
+                    logger.error(f"  fused_embeddings shape: {outputs['fused_embeddings'].shape}")
+                logger.error(f"  Error message: {str(e)}")
+                raise
             
         # Generate editing plan if requested
         if return_timeline and editing_prompt:

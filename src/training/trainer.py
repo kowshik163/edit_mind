@@ -47,7 +47,20 @@ class MultiModalTrainer:
         # Temporarily disabled due to syntax errors
         # self.distiller = KnowledgeDistiller(config)
         self.distiller = None
-        self.rlhf_trainer = RLHFTrainer(config, model)
+        
+        # Only initialize RLHF trainer if enabled and on GPU (bf16 requirement)
+        rlhf_enabled = config.get('rlhf', {}).get('enabled', False) if hasattr(config, 'get') else False
+        if rlhf_enabled and torch.cuda.is_available():
+            try:
+                self.rlhf_trainer = RLHFTrainer(config, model)
+            except Exception as e:
+                logger.warning(f"Failed to initialize RLHF trainer: {e}")
+                self.rlhf_trainer = None
+        else:
+            self.rlhf_trainer = None
+            if rlhf_enabled:
+                logger.warning("RLHF training requires GPU - skipping RLHF trainer initialization")
+        
         self.metrics = VideoEditingMetrics()
         
         # Data loaders
@@ -253,12 +266,17 @@ class MultiModalTrainer:
     def phase4_self_improvement(self):
         """Phase 4: Self-improvement using RLHF"""
         
+        if self.rlhf_trainer is None:
+            logger.warning("RLHF trainer not initialized - skipping phase 4")
+            return {"status": "skipped", "reason": "RLHF trainer not available"}
+        
         self.model.set_training_phase("self_improvement")
         
         # Use RLHF trainer
         self.rlhf_trainer.train_with_human_feedback(self.model)
         
         logger.info("✅ Phase 4: Self-Improvement (RLHF) Completed")
+        return {"status": "completed"}
         
     def phase5_autonomous_integration(self):
         """Phase 5: Final integration and testing"""
