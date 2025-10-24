@@ -15,7 +15,8 @@ from transformers import (
     AutoModel,
     LlamaForCausalLM,
     CLIPVisionModel,
-    WhisperModel
+    WhisperModel,
+    WhisperProcessor
 )
 
 from models.multimodal_fusion import MultiModalFusionModule
@@ -43,6 +44,9 @@ class HybridVideoAI(nn.Module):
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
+        
+        # Set device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Auto-download models if not available
         self._ensure_models_available()
@@ -121,11 +125,19 @@ class HybridVideoAI(nn.Module):
                 cache_dir=config.get('model_cache_dir', 'models/cache'),
                 torch_dtype=model_dtype
             )
+            self.audio_processor = WhisperProcessor.from_pretrained(
+                audio_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
             logger.info(f"✅ Loaded advanced audio model: {audio_model}")
         except Exception as e:
             logger.warning(f"Failed to load Whisper Large, using base model: {e}")
             audio_model = 'openai/whisper-base'
             self.audio_encoder = WhisperModel.from_pretrained(
+                audio_model,
+                cache_dir=config.get('model_cache_dir', 'models/cache')
+            )
+            self.audio_processor = WhisperProcessor.from_pretrained(
                 audio_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
@@ -135,12 +147,22 @@ class HybridVideoAI(nn.Module):
             cache_dir=config.get('model_cache_dir', 'models/cache')
         )
         
-        # Multimodal fusion layer
+        # Detect actual embedding dimensions from loaded models
+        text_dim = self.language_model.get_input_embeddings().embedding_dim
+        vision_dim = self.vision_encoder.config.hidden_size
+        audio_dim = self.audio_encoder.config.d_model
+        
+        logger.info(f"Detected embedding dimensions:")
+        logger.info(f"  text_dim: {text_dim}")
+        logger.info(f"  vision_dim: {vision_dim}")
+        logger.info(f"  audio_dim: {audio_dim}")
+        
+        # Multimodal fusion layer with detected dimensions
         model_config = config.get('model', {})
         self.fusion_module = MultiModalFusionModule(
-            text_dim=model_config.get('text_dim', 768),
-            vision_dim=model_config.get('vision_dim', 768), 
-            audio_dim=model_config.get('audio_dim', 768),
+            text_dim=text_dim,
+            vision_dim=vision_dim, 
+            audio_dim=audio_dim,
             fusion_dim=model_config.get('fusion_dim', 1024),
             num_heads=model_config.get('num_attention_heads', 16)
         )
@@ -345,8 +367,27 @@ class HybridVideoAI(nn.Module):
             
         # Process audio input
         if audio_features is not None:
+            # Convert raw audio to mel-spectrogram features using WhisperProcessor
+            # audio_features should be raw audio waveform (batch_size, audio_length) or (batch_size, channels, audio_length)
+            if audio_features.dim() == 3:
+                # If (B, C, L), take first channel
+                audio_features = audio_features[:, 0, :]
+            
+            # Process audio to mel-spectrogram using the processor
+            # The processor expects a list of numpy arrays
+            audio_list = [audio.cpu().numpy() for audio in audio_features]
+            processed_audio = self.audio_processor(
+                audio_list,
+                sampling_rate=16000,
+                return_tensors="pt",
+                padding=True
+            )
+            
+            # Move to correct device and dtype
+            mel_features = processed_audio.input_features.to(audio_features.device)
+            
             # Use Whisper encoder for audio embeddings
-            audio_embeddings = self.audio_encoder.encoder(audio_features).last_hidden_state
+            audio_embeddings = self.audio_encoder.encoder(mel_features).last_hidden_state
             B, audio_seq_len, audio_dim = audio_embeddings.shape
             
             # Pool audio embeddings to match video frame count if available

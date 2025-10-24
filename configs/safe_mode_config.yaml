@@ -52,6 +52,9 @@ logging:
   log_to_file: true
   use_wandb: false
   wandb_project: auto-editor-test
+  checkpoint_dir: ./checkpoints  # Where to write logs/checkpoints (used by trainer)
+  eval_every: 10  # Evaluate every 10 steps in safe mode
+  save_every: 20  # Save checkpoint every 20 steps
 model:
   audio_dim: 384
   fusion_dim: 1024

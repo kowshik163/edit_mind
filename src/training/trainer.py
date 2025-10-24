@@ -76,6 +76,10 @@ class MultiModalTrainer:
             use_wandb = True
             wandb_project = 'auto-editor'
             experiment_name = 'default'
+        
+        # Store wandb flag as instance variable
+        self.use_wandb = use_wandb
+        
         if use_wandb:
             wandb.init(
                 project=wandb_project,
@@ -195,16 +199,18 @@ class MultiModalTrainer:
                 
                 # Logging
                 if self.global_step % 100 == 0:
-                    wandb.log({
-                        "phase1/train_loss": loss.item(),
-                        "phase1/learning_rate": scheduler.get_last_lr()[0],
-                        "global_step": self.global_step
-                    })
+                    if self.use_wandb:
+                        wandb.log({
+                            "phase1/train_loss": loss.item(),
+                            "phase1/learning_rate": scheduler.get_last_lr()[0],
+                            "global_step": self.global_step
+                        })
                     
                 # Validation
                 if self.global_step % self.config.logging.eval_every == 0:
                     val_metrics = self._validate(val_loader, phase="phase1")
-                    wandb.log(val_metrics)
+                    if self.use_wandb:
+                        wandb.log(val_metrics)
                     
                 # Checkpointing
                 if self.global_step % self.config.logging.save_every == 0:
@@ -215,9 +221,14 @@ class MultiModalTrainer:
             logger.info(f"Phase 1 Epoch {epoch+1} - Average Loss: {avg_train_loss:.4f}")
             
         logger.info("✅ Phase 1: Fusion Pretraining Completed")
+        return {"status": "completed", "final_loss": avg_train_loss}
         
     def phase2_distillation(self):
         """Phase 2: Distill knowledge from expert models"""
+        
+        if self.distiller is None:
+            logger.warning("Knowledge distiller not initialized - skipping phase 2")
+            return {"status": "skipped", "reason": "Distiller not available"}
         
         # Set training phase  
         self.model.set_training_phase("distillation")
@@ -226,6 +237,7 @@ class MultiModalTrainer:
         self.distiller.distill_all_experts(self.model)
         
         logger.info("✅ Phase 2: Knowledge Distillation Completed")
+        return {"status": "completed"}
         
     def phase3_editing_finetuning(self):
         """Phase 3: Fine-tune on video editing datasets"""
@@ -274,12 +286,14 @@ class MultiModalTrainer:
                 self.global_step += 1
                 
                 if self.global_step % 50 == 0:
-                    wandb.log({
-                        "phase3/train_loss": loss.item(),
-                        "global_step": self.global_step
-                    })
+                    if self.use_wandb:
+                        wandb.log({
+                            "phase3/train_loss": loss.item(),
+                            "global_step": self.global_step
+                        })
                     
         logger.info("✅ Phase 3: Editing Fine-tuning Completed")
+        return {"status": "completed"}
         
     def phase4_self_improvement(self):
         """Phase 4: Self-improvement using RLHF"""
@@ -314,15 +328,17 @@ class MultiModalTrainer:
                     logger.info(f"✅ Successfully edited {video_path} -> {output_path}")
                     logger.info(f"Quality Score: {quality_score:.3f}")
                     
-                    wandb.log({
-                        "phase5/quality_score": quality_score,
-                        "phase5/video_path": video_path
-                    })
+                    if self.use_wandb:
+                        wandb.log({
+                            "phase5/quality_score": quality_score,
+                            "phase5/video_path": video_path
+                        })
                     
                 except Exception as e:
                     logger.error(f"❌ Failed to edit {video_path}: {str(e)}")
                     
         logger.info("✅ Phase 5: Autonomous Integration Completed")
+        return {"status": "completed"}
         
     def _compute_contrastive_loss(self, outputs: Dict, batch: Dict) -> torch.Tensor:
         """Compute contrastive loss for multimodal alignment"""

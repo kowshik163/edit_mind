@@ -406,14 +406,22 @@ class TrainingOrchestrator:
                         continue
                     
                     phase_results[phase] = result
-                    logger.info(f"✅ Phase {phase} complete: {result.get('status', 'unknown')}")
+                    
+                    # Handle different result statuses
+                    status = result.get('status', 'unknown')
+                    if status == 'skipped':
+                        logger.warning(f"⚠️ Phase {phase} skipped: {result.get('reason', 'No reason provided')}")
+                    elif status == 'completed':
+                        logger.info(f"✅ Phase {phase} complete")
+                    else:
+                        logger.info(f"Phase {phase} status: {status}")
                     
                 except Exception as e:
                     logger.error(f"❌ Phase {phase} failed: {e}")
                     phase_results[phase] = {"status": "failed", "error": str(e)}
                     
                     # Decide whether to continue or stop
-                    if phase in ["pretrain", "distill"]:
+                    if phase in ["pretrain"]:  # Only pretrain is truly critical
                         logger.error("Critical phase failed, stopping training")
                         return False
                     else:
