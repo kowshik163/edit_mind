@@ -302,6 +302,17 @@ class HybridVideoAI(nn.Module):
         Returns:
             Dictionary with model outputs
         """
+        logger.info("=" * 80)
+        logger.info("FORWARD PASS STARTED")
+        logger.info("Input shapes:")
+        if video_frames is not None:
+            logger.info(f"  video_frames: {video_frames.shape}")
+        if audio_features is not None:
+            logger.info(f"  audio_features: {audio_features.shape}")
+        if text_input_ids is not None:
+            logger.info(f"  text_input_ids: {text_input_ids.shape}")
+        logger.info("=" * 80)
+        
         outputs = {}
         
         # Process text input
@@ -360,6 +371,23 @@ class HybridVideoAI(nn.Module):
             
         # Multimodal fusion
         if any(k in outputs for k in ['text_embeddings', 'vision_embeddings', 'audio_embeddings']):
+            # Log shapes before fusion
+            logger.info("="*60)
+            logger.info("MULTIMODAL FUSION - Input Shapes:")
+            if 'text_embeddings' in outputs:
+                logger.info(f"  text_embeddings: {outputs['text_embeddings'].shape}")
+            else:
+                logger.info(f"  text_embeddings: None")
+            if 'vision_embeddings' in outputs:
+                logger.info(f"  vision_embeddings: {outputs['vision_embeddings'].shape}")
+            else:
+                logger.info(f"  vision_embeddings: None")
+            if 'audio_embeddings' in outputs:
+                logger.info(f"  audio_embeddings: {outputs['audio_embeddings'].shape}")
+            else:
+                logger.info(f"  audio_embeddings: None")
+            logger.info("="*60)
+            
             try:
                 fused_embeddings = self.fusion_module(
                     text_emb=outputs.get('text_embeddings'),
@@ -367,13 +395,18 @@ class HybridVideoAI(nn.Module):
                     audio_emb=outputs.get('audio_embeddings')
                 )
                 outputs['fused_embeddings'] = fused_embeddings
+                logger.info(f"✓ Fusion successful - output shape: {fused_embeddings.shape}")
                 
                 # Video understanding
+                logger.info("Starting video understanding...")
                 video_understanding = self.video_understanding(fused_embeddings)
                 outputs['video_understanding'] = video_understanding
+                logger.info("✓ Video understanding successful")
             except RuntimeError as e:
                 # Log shapes for debugging
-                logger.error(f"Error in multimodal fusion or video understanding:")
+                logger.error("="*60)
+                logger.error(f"ERROR in multimodal fusion or video understanding!")
+                logger.error(f"Error message: {e}")
                 if 'text_embeddings' in outputs:
                     logger.error(f"  text_embeddings shape: {outputs['text_embeddings'].shape}")
                 if 'vision_embeddings' in outputs:

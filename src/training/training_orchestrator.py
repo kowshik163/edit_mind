@@ -97,7 +97,7 @@ class TrainingOrchestrator:
             
             # Data configuration
             'data': {
-                'datasets': ['webvid', 'audioset'],  # Start with smaller datasets
+                'datasets': [],  # Default to no external datasets - use synthetic data
                 'max_samples_per_dataset': 1000,
                 'train_split': 0.8,
                 'val_split': 0.1,

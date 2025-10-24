@@ -296,8 +296,20 @@ class ModelDownloader:
     
     def _save_manifest(self, results: Dict[str, Any]):
         """Save download manifest"""
+        # Filter out non-serializable objects (models, processors)
+        serializable_results = {}
+        for key, value in results.items():
+            if isinstance(value, dict):
+                # Only keep JSON-serializable fields
+                serializable_results[key] = {
+                    k: v for k, v in value.items() 
+                    if k not in ['model', 'processor', 'tokenizer'] and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+                }
+            else:
+                serializable_results[key] = value
+        
         manifest = {
-            "downloaded_models": results,
+            "downloaded_models": serializable_results,
             "cache_dir": str(self.cache_dir),
             "total_models": len(results)
         }

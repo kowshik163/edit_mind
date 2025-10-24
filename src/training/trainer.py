@@ -147,20 +147,38 @@ class MultiModalTrainer:
             
             for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Phase 1 Epoch {epoch+1}")):
                 
-                # Move batch to device
-                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                        for k, v in batch.items()}
-                
-                # Forward pass
-                outputs = self.model(
-                    video_frames=batch.get('video_frames'),
-                    audio_features=batch.get('audio_features'),
-                    text_input_ids=batch.get('text_input_ids'),
-                    text_attention_mask=batch.get('text_attention_mask')
-                )
-                
-                # Compute contrastive loss for multimodal alignment
-                loss = self._compute_contrastive_loss(outputs, batch)
+                try:
+                    # Move batch to device
+                    batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                            for k, v in batch.items()}
+                    
+                    # Log batch shapes
+                    logger.info(f"Batch {batch_idx} shapes:")
+                    for k, v in batch.items():
+                        if isinstance(v, torch.Tensor):
+                            logger.info(f"  {k}: {v.shape}")
+                    
+                    # Forward pass
+                    logger.info("Starting forward pass...")
+                    outputs = self.model(
+                        video_frames=batch.get('video_frames'),
+                        audio_features=batch.get('audio_features'),
+                        text_input_ids=batch.get('text_input_ids'),
+                        text_attention_mask=batch.get('text_attention_mask')
+                    )
+                    logger.info("Forward pass completed")
+                    
+                    # Compute contrastive loss for multimodal alignment
+                    logger.info("Computing contrastive loss...")
+                    loss = self._compute_contrastive_loss(outputs, batch)
+                    logger.info(f"Loss computed: {loss.item()}")
+                    
+                except Exception as e:
+                    logger.error(f"ERROR in batch {batch_idx}:")
+                    logger.error(f"Error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    raise
                 
                 # Backward pass
                 loss.backward()
@@ -314,17 +332,26 @@ class MultiModalTrainer:
         if fused_emb is None:
             return torch.tensor(0.0, device=self.device)
             
-        # Simple contrastive loss implementation
-        # In practice, you'd use more sophisticated losses like InfoNCE
-        batch_size = fused_emb.size(0)
+        # Pool fused embeddings to get single vector per sample
+        # fused_emb shape: (B, seq_len, fusion_dim) -> (B, fusion_dim)
+        pooled_emb = fused_emb.mean(dim=1)  # Average pooling over sequence dimension
         
-        # Create positive and negative pairs
-        similarity_matrix = torch.matmul(fused_emb, fused_emb.transpose(-2, -1))
+        # Normalize embeddings for contrastive learning
+        pooled_emb = F.normalize(pooled_emb, p=2, dim=1)
+        
+        # Simple contrastive loss implementation
+        # Compute similarity matrix: (B, B)
+        batch_size = pooled_emb.size(0)
+        temperature = 0.07  # Temperature for contrastive loss
+        
+        # Compute cosine similarity matrix
+        similarity_matrix = torch.matmul(pooled_emb, pooled_emb.t()) / temperature
         
         # Mask for positive pairs (same batch index)
         labels = torch.arange(batch_size, device=self.device)
         
         # Cross-entropy loss on similarity matrix
+        # Now similarity_matrix is (B, B) and labels is (B,) - correct shapes!
         loss = F.cross_entropy(similarity_matrix, labels)
         
         return loss

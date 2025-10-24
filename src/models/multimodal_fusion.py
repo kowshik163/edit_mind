@@ -97,6 +97,11 @@ class MultiModalFusionModule(nn.Module):
             fused_emb: (B, L, fusion_dim) fused embeddings
         """
         
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("="*60)
+        logger.info("FUSION MODULE - Starting")
+        
         modalities = []
         
         # Project each modality to common dimension and align sequence lengths
@@ -106,20 +111,26 @@ class MultiModalFusionModule(nn.Module):
         seq_lengths = []
         if text_emb is not None:
             seq_lengths.append(text_emb.shape[1])
+            logger.info(f"  text_emb input shape: {text_emb.shape}")
         if vision_emb is not None:
             seq_lengths.append(vision_emb.shape[1])
+            logger.info(f"  vision_emb input shape: {vision_emb.shape}")
         if audio_emb is not None:
             seq_lengths.append(audio_emb.shape[1])
+            logger.info(f"  audio_emb input shape: {audio_emb.shape}")
         
         if seq_lengths:
             target_seq_len = min(seq_lengths)  # Use minimum to avoid padding
+            logger.info(f"  target_seq_len: {target_seq_len}")
         else:
             raise ValueError("At least one modality must be provided")
         
         # Project and align each modality
         if text_emb is not None:
+            logger.info(f"  Projecting text_emb...")
             text_proj = self.text_proj(text_emb)
             text_proj = self.text_norm(text_proj)
+            logger.info(f"  text_proj shape after projection: {text_proj.shape}")
             # Align sequence length
             if text_proj.shape[1] > target_seq_len:
                 text_proj = text_proj[:, :target_seq_len, :]
@@ -128,6 +139,7 @@ class MultiModalFusionModule(nn.Module):
                 padding = torch.zeros(text_proj.shape[0], target_seq_len - text_proj.shape[1], 
                                      text_proj.shape[2], device=text_proj.device, dtype=text_proj.dtype)
                 text_proj = torch.cat([text_proj, padding], dim=1)
+            logger.info(f"  text_proj shape after alignment: {text_proj.shape}")
             modalities.append(('text', text_proj))
             
         if vision_emb is not None:
@@ -169,27 +181,44 @@ class MultiModalFusionModule(nn.Module):
                 
         # Multi-modal fusion
         fused_embeddings = []
+        logger.info(f"Processing {len(modalities)} modalities for fusion")
         
         for i, (name_i, emb_i) in enumerate(modalities):
+            logger.info(f"  Modality {i}: {name_i}, shape: {emb_i.shape}")
             enhanced_emb = emb_i
             
             # Cross-attention with other modalities
             for j, (name_j, emb_j) in enumerate(modalities):
                 if i != j:
-                    # Cross-attend from modality i to modality j
-                    attended_emb, _ = self._cross_attend(emb_i, emb_j, name_i, name_j)
-                    enhanced_emb = enhanced_emb + attended_emb
+                    logger.info(f"    Cross-attending {name_i} -> {name_j}")
+                    logger.info(f"      query ({name_i}): {emb_i.shape}")
+                    logger.info(f"      key/value ({name_j}): {emb_j.shape}")
+                    
+                    try:
+                        # Cross-attend from modality i to modality j
+                        attended_emb, _ = self._cross_attend(emb_i, emb_j, name_i, name_j)
+                        logger.info(f"      attended output: {attended_emb.shape}")
+                        enhanced_emb = enhanced_emb + attended_emb
+                    except Exception as e:
+                        logger.error(f"      ERROR in cross-attention: {e}")
+                        raise
                     
             # Apply modality-specific processing
-            if name_i == 'text':
-                enhanced_emb = self.text_ffn(enhanced_emb) + enhanced_emb
-                enhanced_emb = enhanced_emb * torch.sigmoid(self.text_gate)
-            elif name_i == 'vision':
-                enhanced_emb = self.vision_ffn(enhanced_emb) + enhanced_emb  
-                enhanced_emb = enhanced_emb * torch.sigmoid(self.vision_gate)
-            else:  # audio
-                enhanced_emb = self.audio_ffn(enhanced_emb) + enhanced_emb
-                enhanced_emb = enhanced_emb * torch.sigmoid(self.audio_gate)
+            logger.info(f"  Applying {name_i}-specific FFN to shape: {enhanced_emb.shape}")
+            try:
+                if name_i == 'text':
+                    enhanced_emb = self.text_ffn(enhanced_emb) + enhanced_emb
+                    enhanced_emb = enhanced_emb * torch.sigmoid(self.text_gate)
+                elif name_i == 'vision':
+                    enhanced_emb = self.vision_ffn(enhanced_emb) + enhanced_emb  
+                    enhanced_emb = enhanced_emb * torch.sigmoid(self.vision_gate)
+                else:  # audio
+                    enhanced_emb = self.audio_ffn(enhanced_emb) + enhanced_emb
+                    enhanced_emb = enhanced_emb * torch.sigmoid(self.audio_gate)
+                logger.info(f"  After FFN: {enhanced_emb.shape}")
+            except Exception as e:
+                logger.error(f"  ERROR in FFN: {e}")
+                raise
                 
             fused_embeddings.append(enhanced_emb)
             

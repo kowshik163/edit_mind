@@ -99,9 +99,10 @@ system:
 teachers:
   audio_models:
   - openai/whisper-tiny
-  code_generation: codellama/CodeLlama-7b-hf
+  code_generation: microsoft/DialoGPT-small
   text_model: microsoft/DialoGPT-small
   video_model: openai/clip-vit-base-patch32
+  vision_encoder: openai/clip-vit-base-patch32
 training:
   batch_size: 2  # Reduced batch size for safe mode
   phases:
