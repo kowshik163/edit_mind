@@ -373,7 +373,22 @@ class MultiModalTrainer:
         return loss
         
     def _compute_editing_loss(self, outputs: Dict, batch: Dict) -> torch.Tensor:
-        """Compute loss for editing timeline prediction"""
+        """Compute loss for editing timeline prediction with both type and parameter supervision
+        
+        This enhanced loss function handles:
+        1. Cut point prediction (binary classification)
+        2. Effect type classification (multi-class)
+        3. Effect parameter regression (continuous values)
+        4. Transition type classification (multi-class)
+        5. Transition parameter regression (continuous values)
+        
+        Args:
+            outputs: Model predictions containing timeline information
+            batch: Ground truth batch data with target_timeline
+            
+        Returns:
+            Combined weighted loss tensor
+        """
         
         timeline = outputs.get('timeline')
         if timeline is None:
@@ -383,19 +398,155 @@ class MultiModalTrainer:
         target_timeline = batch.get('target_timeline')
         if target_timeline is None:
             # If no ground truth, use a simple reconstruction loss
-            return F.mse_loss(timeline.get('cut_points', torch.zeros(1)), 
-                             torch.zeros_like(timeline.get('cut_points', torch.zeros(1))))
+            return F.mse_loss(timeline.get('cut_points', torch.zeros(1, device=self.device)), 
+                             torch.zeros_like(timeline.get('cut_points', torch.zeros(1, device=self.device))))
         
-        # Timeline-specific loss computation
-        loss = 0.0
+        # Handle both single dict and list of dicts (batch)
+        if isinstance(target_timeline, list):
+            # Stack batch items
+            target_cut_points = torch.stack([t['cut_points'] for t in target_timeline]).to(self.device)
+            target_effect_types = torch.stack([t['effect_types'] for t in target_timeline]).to(self.device)
+            target_effect_params = torch.stack([t['effect_params'] for t in target_timeline]).to(self.device)
+            target_transition_types = torch.stack([t['transition_types'] for t in target_timeline]).to(self.device)
+            target_transition_params = torch.stack([t['transition_params'] for t in target_timeline]).to(self.device)
+        else:
+            # Single sample - ensure proper shape
+            target_cut_points = target_timeline.get('cut_points', torch.zeros(1, device=self.device)).to(self.device)
+            target_effect_types = target_timeline.get('effect_types', torch.zeros(1, device=self.device)).to(self.device)
+            target_effect_params = target_timeline.get('effect_params', torch.zeros(1, 8, device=self.device)).to(self.device)
+            target_transition_types = target_timeline.get('transition_types', torch.zeros(1, device=self.device)).to(self.device)
+            target_transition_params = target_timeline.get('transition_params', torch.zeros(1, 8, device=self.device)).to(self.device)
         
-        if 'cut_points' in timeline and 'cut_points' in target_timeline:
-            loss += F.mse_loss(timeline['cut_points'], target_timeline['cut_points'])
+        # Initialize total loss
+        total_loss = 0.0
+        loss_components = {}
+        
+        # Loss weights (configurable via config in future)
+        weights = {
+            'cut_points': 1.0,
+            'effect_types': 2.0,
+            'effect_params': 1.5,
+            'transition_types': 2.0,
+            'transition_params': 1.5
+        }
+        
+        # 1. Cut points loss (binary classification per frame)
+        if 'cut_points' in timeline and target_cut_points is not None:
+            pred_cuts = timeline['cut_points']
             
-        if 'transitions' in timeline and 'transitions' in target_timeline:
-            loss += F.cross_entropy(timeline['transitions'], target_timeline['transitions'])
+            # Ensure shapes match
+            if pred_cuts.shape != target_cut_points.shape:
+                # Reshape if needed
+                if len(pred_cuts.shape) == 1:
+                    pred_cuts = pred_cuts.unsqueeze(0)
+                if len(target_cut_points.shape) == 1:
+                    target_cut_points = target_cut_points.unsqueeze(0)
             
-        return loss
+            # Binary cross entropy for cut detection
+            cut_loss = F.binary_cross_entropy_with_logits(
+                pred_cuts.float(), 
+                target_cut_points.float()
+            )
+            loss_components['cut_points'] = cut_loss.item()
+            total_loss += weights['cut_points'] * cut_loss
+        
+        # 2. Effect type classification loss
+        if 'effect_types' in timeline and target_effect_types is not None:
+            pred_effect_types = timeline['effect_types']
+            
+            # Ensure proper shape [batch_size, max_effects, num_classes]
+            if len(pred_effect_types.shape) == 2:
+                # [batch_size, max_effects] - need to expand for CrossEntropy
+                # Assume model outputs logits over effect type classes
+                pass
+            
+            # Flatten for cross entropy: [batch_size * max_effects, num_classes] and [batch_size * max_effects]
+            batch_size = pred_effect_types.shape[0] if len(pred_effect_types.shape) > 1 else 1
+            max_effects = target_effect_types.shape[-1] if len(target_effect_types.shape) > 1 else target_effect_types.shape[0]
+            
+            # Only compute loss on non-zero (non-padding) effect types
+            mask = target_effect_types.view(-1) > 0
+            
+            if mask.sum() > 0 and len(pred_effect_types.shape) > 2:
+                pred_flat = pred_effect_types.view(-1, pred_effect_types.shape[-1])
+                target_flat = target_effect_types.view(-1).long()
+                
+                # Apply mask and compute loss
+                effect_type_loss = F.cross_entropy(
+                    pred_flat[mask],
+                    target_flat[mask],
+                    reduction='mean'
+                )
+                loss_components['effect_types'] = effect_type_loss.item()
+                total_loss += weights['effect_types'] * effect_type_loss
+        
+        # 3. Effect parameter regression loss (MSE on continuous parameters)
+        if 'effect_params' in timeline and target_effect_params is not None:
+            pred_effect_params = timeline['effect_params']
+            
+            # Only compute loss where effect types are non-zero
+            mask = target_effect_types.view(-1) > 0
+            
+            if mask.sum() > 0:
+                # Reshape for loss computation
+                pred_params_flat = pred_effect_params.view(-1, pred_effect_params.shape[-1])
+                target_params_flat = target_effect_params.view(-1, target_effect_params.shape[-1])
+                
+                # MSE loss on parameters
+                effect_param_loss = F.mse_loss(
+                    pred_params_flat[mask],
+                    target_params_flat[mask],
+                    reduction='mean'
+                )
+                loss_components['effect_params'] = effect_param_loss.item()
+                total_loss += weights['effect_params'] * effect_param_loss
+        
+        # 4. Transition type classification loss
+        if 'transition_types' in timeline and target_transition_types is not None:
+            pred_transition_types = timeline['transition_types']
+            
+            # Only compute loss on non-zero (non-padding) transition types
+            mask = target_transition_types.view(-1) > 0
+            
+            if mask.sum() > 0 and len(pred_transition_types.shape) > 2:
+                pred_flat = pred_transition_types.view(-1, pred_transition_types.shape[-1])
+                target_flat = target_transition_types.view(-1).long()
+                
+                transition_type_loss = F.cross_entropy(
+                    pred_flat[mask],
+                    target_flat[mask],
+                    reduction='mean'
+                )
+                loss_components['transition_types'] = transition_type_loss.item()
+                total_loss += weights['transition_types'] * transition_type_loss
+        
+        # 5. Transition parameter regression loss
+        if 'transition_params' in timeline and target_transition_params is not None:
+            pred_transition_params = timeline['transition_params']
+            
+            # Only compute loss where transition types are non-zero
+            mask = target_transition_types.view(-1) > 0
+            
+            if mask.sum() > 0:
+                pred_params_flat = pred_transition_params.view(-1, pred_transition_params.shape[-1])
+                target_params_flat = target_transition_params.view(-1, target_transition_params.shape[-1])
+                
+                transition_param_loss = F.mse_loss(
+                    pred_params_flat[mask],
+                    target_params_flat[mask],
+                    reduction='mean'
+                )
+                loss_components['transition_params'] = transition_param_loss.item()
+                total_loss += weights['transition_params'] * transition_param_loss
+        
+        # Log individual loss components (if wandb is enabled)
+        if self.use_wandb and len(loss_components) > 0:
+            wandb.log({
+                **{f'loss/{k}': v for k, v in loss_components.items()},
+                'loss/editing_total': total_loss.item() if isinstance(total_loss, torch.Tensor) else total_loss
+            }, step=self.global_step)
+        
+        return total_loss if isinstance(total_loss, torch.Tensor) else torch.tensor(total_loss, device=self.device)
         
     def _validate(self, val_loader: DataLoader, phase: str) -> Dict[str, float]:
         """Run validation"""

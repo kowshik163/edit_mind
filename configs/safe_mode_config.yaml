@@ -1,129 +1,197 @@
+project_name: autonomous_video_editor_safe_mode
+description: Minimal configuration for safe mode testing, including distillation.
+
+paths:
+  cache_dir: ./cache
+  data_dir: ./data/synthetic_samples # Point to synthetic data for safe mode
+  output_dir: ./outputs
+  checkpoints_dir: ./checkpoints
+
+# Directory structure matching main_config for consistency
+model_cache_dir: ./models/cache
+data_root: ./data # General data root
+output_dir: ./outputs
 checkpoint_dir: ./checkpoints
+log_dir: ./logs
+
+teachers: # Minimal teachers for safe mode
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+  audio_models:
+    - openai/whisper-tiny
+  # Add other minimal teacher models if needed for distillation testing
+  object_detection: facebook/detr-resnet-50 # Example fallback
+  segmentation: facebook/sam-vit-base # Example fallback
+  code_generation: microsoft/DialoGPT-small
+
+students: # Minimal students matching teachers for simplicity
+  text_model: microsoft/DialoGPT-small
+  video_model: openai/clip-vit-base-patch32
+  audio_models:
+    - openai/whisper-tiny
+  # fusion_model: # Optional: Define if specific fusion needed
+
+model: # Consistent with safe_mode teachers/students
+  text_dim: 768 # DialoGPT-small
+  vision_dim: 512 # CLIP-base
+  audio_dim: 384 # Whisper-tiny
+  fusion_dim: 1024
+  hidden_dim: 2048
+  num_attention_heads: 16 # Adjust based on student models if needed
+  num_layers: 12 # Adjust based on student models if needed
+training:
+  batch_size: 1 # Minimal batch size
+  # Define all phases needed, even if epochs are 0 or 1
+  phases:
+    - pretrain
+    - distill
+    # - finetune # Keep phases included for structure
+    # - rlhf
+    # - autonomous
+
+  # Phase 1: Fusion Pretraining
+  phase1:
+    num_epochs: 1 # Minimal epochs
+    learning_rate: 5e-5 # Adjusted LR
+    weight_decay: 0.01
+    gradient_accumulation_steps: 1
+    warmup_steps: 10
+
+  # Phase 2: Knowledge Distillation
+  phase2:
+    num_epochs: 1 # Minimal epochs
+    learning_rate: 2e-5 # Adjusted LR
+    weight_decay: 0.01
+    gradient_accumulation_steps: 1
+    # Distillation specific params from main_config added here
+    temperature: 2.0 # Default temp
+    alpha: 0.5 # Default alpha balance
+
+  # Phase 3: Editing Fine-tuning (Keep structure, minimal epochs)
+  phase3:
+    num_epochs: 0 # Skip by default in safe mode unless testing
+    learning_rate: 1e-5
+    weight_decay: 0.01
+    gradient_accumulation_steps: 1
+    lora_r: 8 # Include LoRA params if structure needed
+    lora_alpha: 16
+
+  # Phase 4: RLHF (Keep structure, disabled)
+  phase4:
+    enabled: false # Ensure RLHF specific keys are present but disabled
+    num_epochs: 0
+    # Add other RLHF params if needed by code structure
+
+  # Phase 5: Autonomous (Keep structure, disabled)
+  phase5:
+    enabled: false
+    num_epochs: 0
+
+# Data configuration for safe mode
 data:
-  datasets: []  # Skip external dataset downloads for safe mode
-  frame_sample_rate: 2
-  max_audio_length: 160000
-  max_frames: 8  # Reduced for safe mode to avoid tensor size mismatches
-  num_workers: 2
-  train_split: 0.8
+  datasets: ['synthetic'] # Explicitly use only synthetic data
+  max_frames: 8 # Reduced frames
+  max_audio_length: 32000 # Reduced audio length (e.g., 2 seconds)
+  frame_sample_rate: 4 # Sample less frequently
+  num_workers: 0 # Use main process for easier debugging
+  train_split: 0.8 # Standard splits
   val_split: 0.1
   test_split: 0.1
-data_root: ./data
-datasets:
-  synthetic_samples:
+  max_samples_per_dataset: 50 # Limit samples strictly
+
+# Distillation configuration added explicitly
+distillation:
+  strategies:
+    - feature_matching # Minimal strategy for safe mode
+    # - logit_matching
+    # - multimodal_alignment
+  temperature: 2.0 # Consistent with training.phase2
+  alpha: 0.5 # Consistent with training.phase2
+  batch_size: 1 # Minimal batch size for distillation steps
+  learning_rate: 1e-5 # Separate LR for distillation phase if needed
+  # Advanced teachers disabled for safe mode by default
+  advanced_teachers:
+    enable_rt_detr: false
+    enable_hq_sam: false
+    enable_beatnet: false
+    enable_demucs: false
+    fallback_models: true # Ensure fallback is explicitly true
+
+# Finetuning section (minimal, matches training.phase3)
+finetuning:
+  method: qlora # Keep method defined if code expects it
+  precision: float32 # Avoid bfloat16 issues in safe mode
+  max_epochs: 0 # Matches training.phase3
+  gradient_accumulation: 1 # Matches training.phase3
+  save_every: 100 # Keep keys if code expects them
+  eval_every: 50
+
+# RLHF section (disabled, but keys present)
+rlhf:
+  enabled: false # Explicitly disable
+  reward_model: none # Placeholder
+  dataset: none
+  method: ppo
+  rollout_batch_size: 1
+  learning_rate: 1e-6
+
+# Self-coding section (disabled)
+self_coding:
+  enabled: false
+  model_name: none
+  execution:
+    max_execution_time: 5
+    max_temp_files: 2
+    allowed_modules: ['numpy', 'math'] # Minimal allowed
+
+# Datasets section (simplified for safe mode)
+datasets: # This section might be redundant if data.datasets is used, keep for structure
+  synthetic_samples: # Matches data.datasets list
     enabled: true
-    num_samples: 50
+    num_samples: 50 # Consistent with data.max_samples_per_dataset
     output_dir: ./data/synthetic_samples
-  stock_footage:
+  # Disable others explicitly
+  webvid:
+    enabled: false
+  audioset:
+    enabled: false
+  activitynet:
+    enabled: false
+  tvsum:
+    enabled: false
+  summe:
     enabled: false
   templates:
     enabled: false
-synthetic_data:
-  enabled: true
-  num_samples: 50
-  data_dir: ./data/synthetic_samples
-  video:
-    - synthetic_samples  # Only use synthetic data
-  audio: []
-  text: []
-  multimodal: []
-description: Minimal configuration for testing the pipeline on a local machine.
-distillation:
-  alpha: 0.5
-  batch_size: 1
-  learning_rate: 1e-5
-  strategies:
-  - feature_matching
-  temperature: 2.0
-evaluation:
-  metrics:
-  - bleu
-  - rouge
-finetuning:
-  eval_every: 50
-  gradient_accumulation: 1
-  max_epochs: 1
-  method: qlora
-  save_every: 100
-log_dir: ./logs
+  stock_footage:
+    enabled: false
+
+evaluation: # Keep structure
+  benchmarks: []
+  metrics: ['bleu'] # Minimal metric
+
+# Logging configuration
 logging:
-  experiment_name: safe-mode-test
-  log_level: INFO
+  experiment_name: safe-mode-test-distill
+  log_level: DEBUG # More verbose for debugging
   log_to_file: true
-  use_wandb: false
-  wandb_project: auto-editor-test
-  checkpoint_dir: ./checkpoints  # Where to write logs/checkpoints (used by trainer)
-  eval_every: 10  # Evaluate every 10 steps in safe mode
-  save_every: 20  # Save checkpoint every 20 steps
-model:
-  audio_dim: 384
-  fusion_dim: 1024
-  hidden_dim: 2048
-  num_attention_heads: 16
-  num_layers: 12
-  text_dim: 768
-  vision_dim: 512
-model_cache_dir: ./models/cache
-output_dir: ./outputs
-paths:
-  cache_dir: ./cache
-  checkpoints_dir: ./checkpoints
-  data_dir: ./data/synthetic_samples
-  output_dir: ./outputs
-project_name: autonomous_video_editor_test_run
-rlhf:
-  enabled: false
-safe_mode:
-  eval_steps: 10
-  max_grad_norm: 1.0
-  max_samples_per_dataset: 50
-  phases:
-  - pretrain
-  - distill
-  save_steps: 20
-  test_split: 0.1
-  train_split: 0.8
-  val_split: 0.1
-self_coding:
-  enabled: false
-students:
-  audio_models:
-  - openai/whisper-tiny
-  text_model: microsoft/DialoGPT-small
-  video_model: openai/clip-vit-base-patch32
+  use_wandb: false # Disable WandB
+  checkpoint_dir: ./checkpoints # Matches paths
+  eval_every: 10 # Evaluate frequently
+  save_every: 20 # Save frequently
+
+# System configuration (minimal resources)
 system:
-  checkpoint_every: 100
-  compile_model: false
-  device: auto
-  max_memory_gb: 8
-  mixed_precision: false
-  num_workers: 2
+  device: cpu # Force CPU for safety and compatibility
+  mixed_precision: false # Disable mixed precision
+  gradient_checkpointing: false # Disable gradient checkpointing
   dataloader_pin_memory: false
-teachers:
-  audio_models:
-  - openai/whisper-tiny
-  code_generation: microsoft/DialoGPT-small
-  text_model: microsoft/DialoGPT-small
-  video_model: openai/clip-vit-base-patch32
-  vision_encoder: openai/clip-vit-base-patch32
-training:
-  batch_size: 2  # Reduced batch size for safe mode
-  phases:
-  - pretrain
-  - distill
-  phase1:
-    gradient_accumulation_steps: 2
-    learning_rate: 1e-4
-    num_epochs: 3
-    warmup_steps: 100
-    weight_decay: 0.01
-  phase2:
-    gradient_accumulation_steps: 4
-    learning_rate: 3e-5
-    num_epochs: 3
-    weight_decay: 0.01
-  phase3:
-    gradient_accumulation_steps: 8
-    learning_rate: 1e-5
-    num_epochs: 5
-    weight_decay: 0.01
+  num_workers: 0 # Matches data.num_workers
+  max_memory_gb: 4 # Limit memory
+  compile_model: false
+
+# Safe mode specific block (optional, can consolidate)
+safe_mode: # Keep if code specifically checks this block
+  enabled: true
+  max_samples_per_dataset: 50 # Consistent
+  phases: ['pretrain', 'distill'] # Explicit phases for safe mode

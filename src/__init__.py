@@ -12,7 +12,7 @@ __email__ = "team@auto-editor.ai"
 
 from .core.hybrid_ai import HybridVideoAI
 from .training.training_orchestrator import TrainingOrchestrator
-from .core.cli import CLIInterface
+from .core.cli import app as CLIInterface
 from .training.trainer import MultiModalTrainer
 from .distillation.distiller import KnowledgeDistiller
 

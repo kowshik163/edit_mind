@@ -3,237 +3,300 @@ description: >
   Full multimodal AI pipeline for autonomous video editing.
   Teachers = maximum quality models, Students = distilled/efficient deployable models.
 
+# Consistent Path Structure
 paths:
   cache_dir: ./cache
-  data_dir: ./datasets
+  data_dir: ./datasets 
   output_dir: ./outputs
   checkpoints_dir: ./checkpoints
 
-#directory
+# Directory structure
 model_cache_dir: ./models/cache
-data_root: ./data
+data_root: ./data # General root, specific datasets below or in data.datasets
 output_dir: ./outputs
 checkpoint_dir: ./checkpoints
 log_dir: ./logs
 
 teachers:
-  text_model: zai-org/GLM-4.5  # Replaced with a top-performing, open-source agentic LLM.
-  video_model: OpenGVLab/InternVideo2-Large
+  text_model: zai-org/GLM-4.5 # Top-performing LLM
+  video_model: OpenGVLab/InternVideo2-Large # Advanced video model
   audio_models:
-    - openai/whisper-large-v3
-    - Qwen/Qwen2-Audio
-  fusion_model: Qwen/Qwen2.5-VL-72B
-  
+    - openai/whisper-large-v3 # Best Whisper
+    - Qwen/Qwen2-Audio # Strong alternative
+  fusion_model: Qwen/Qwen2.5-VL-72B # Powerful VLM for fusion guidance
+
   # Advanced teacher models for enhanced distillation
-  object_detection: RT-DETR/rtdetr-resnet50  # Real-time object detection
-  segmentation: HQ-SAM/sam-hq-vit-h  # High-quality segmentation
-  music_analysis: BeatNet/beatnet  # Music structure and rhythm
-  audio_separation: Demucs/htdemucs  # Audio source separation
-  
-  # New advanced video generation models
+  object_detection: PekingU/rt-detr-resnet50 # Using Hugging Face naming
+  segmentation: facebook/sam-vit-huge # High-quality SAM (ensure HQ-SAM compatible weights or use this)
+  music_analysis: BeatNet/beatnet # Requires BeatNet package
+  audio_separation: facebook/htdemucs # Demucs requires 'demucs' package
+
+  # New advanced video generation models (primarily for synthetic data gen, not direct distillation target)
   video_generation:
-    wan: alibaba-pai/Wan-2.2  # Alibaba's Wan 2.2 video generation
-    mochi: genmo/mochi-1  # Genmo's Mochi 1 video model
-    ltx_video: lightricks/ltx-video  # Lightricks LTX-Video
-    hunyuan_video: tencent/hunyuan-video  # Tencent HunyuanVideo
-    videocrafter: VideoCrafter/VideoCrafter1  # VideoCrafter1
-  
+    wan: alibaba-pai/Wan-2.2
+    mochi: genmo/mochi-1
+    ltx_video: lightricks/ltx-video
+    hunyuan_video: tencent/hunyuan-video
+    videocrafter: VideoCrafter/VideoCrafter1
+
   # Self-coding teacher model
   code_generation: codellama/CodeLlama-13b-Python-hf
 
-students:
+students: # Efficient deployable models
   text_model: microsoft/phi-3-mini-4k-instruct
-  video_model: VideoMAE/video-mae-small
+  video_model: MCG-NJU/videomae-base # Using base VideoMAE
   audio_models:
-    - microsoft/wav2vec2-base
-    - AudioMAE/audio-mae-small
-  fusion_model: llava-hf/llava-v1.6-mistral-7b
+    - facebook/wav2vec2-base-960h # Changed source for wav2vec2
+    - facebook/data2vec-audio-base-960h # Replaced AudioMAE with data2vec
+  fusion_model: llava-hf/llava-1.5-7b-hf # Changed source for llava
 
-# Model architecture configuration
+# Model architecture configuration (Adjust dims based on actual student models)
 model:
-  text_dim: 768
-  vision_dim: 768
-  audio_dim: 768
-  fusion_dim: 1024
-  hidden_dim: 2048
-  num_attention_heads: 16
-  num_layers: 12
+  text_dim: 3072 # Phi-3 Mini
+  vision_dim: 768 # VideoMAE Base
+  audio_dim: 768 # Wav2Vec2/Data2Vec Base
+  fusion_dim: 1024 # Target fusion dimension
+  hidden_dim: 2048 # Intermediate hidden dimension
+  num_attention_heads: 16 # Common value, adjust if needed
+  num_layers: 12 # Common value, adjust if needed
 
-# Training configuration
+# Training configuration (with all phases)
 training:
-  batch_size: 8
-  
+  batch_size: 4 # Moderate batch size, adjust based on GPU memory
+  # Define all phases
+  phases:
+    - pretrain
+    - distill
+    - finetune
+    - rlhf
+    - autonomous
+
   # Phase 1: Fusion Pretraining
   phase1:
     num_epochs: 3
     learning_rate: 1e-4
     weight_decay: 0.01
-    gradient_accumulation_steps: 2
-    warmup_steps: 100
-    
-  # Phase 2: Knowledge Distillation  
+    gradient_accumulation_steps: 4 # Accumulate more gradients
+    warmup_steps: 500
+
+  # Phase 2: Knowledge Distillation
   phase2:
     num_epochs: 3
     learning_rate: 3e-5
     weight_decay: 0.01
     gradient_accumulation_steps: 4
-    
+    # Distillation specific params needed
+    temperature: 3.0 # Distillation temperature
+    alpha: 0.7 # Balance between soft/hard loss if hard targets are used
+
   # Phase 3: Editing Fine-tuning
   phase3:
     num_epochs: 5
     learning_rate: 1e-5
     weight_decay: 0.01
     gradient_accumulation_steps: 8
+    lora_r: 16 # LoRA rank
+    lora_alpha: 32 # LoRA alpha
+
+  # Phase 4: RLHF
+  phase4: # Adding phase 4 explicitly
+    enabled: true # Enable RLHF
+    num_epochs: 2
+    learning_rate: 1e-6 # RL usually needs smaller LR
+    # Add other RLHF params as required by RLHFTrainer
+    reward_model: Qwen/Qwen1.5-7B # Example reward model
+    ppo_epochs: 4
+    batch_size: 2 # RL often uses smaller batches
+
+  # Phase 5: Autonomous Integration
+  phase5: # Adding phase 5 explicitly
+    enabled: true
+    num_epochs: 2
+    learning_rate: 5e-6 # Fine-tuning LR
+    # Add other params if needed
 
 # Data configuration
 data:
-  max_frames: 32
-  max_audio_length: 160000
-  frame_sample_rate: 2
-  num_workers: 4
+  datasets: # List datasets to actually use for training
+    - webvid10m # Using WebVid features
+    - audioset
+    - activitynet # Using ActivityNet annotations
+    - tvsum
+    - summe
+    - synthetic # Include generated synthetic data
+    - templates # Include template pairs
+  max_frames: 32 # Number of frames per video sample
+  max_audio_length: 160000 # Max audio samples (e.g., 10 seconds at 16kHz)
+  frame_sample_rate: 2 # Sample every N seconds or frames
+  num_workers: 4 # Dataloader workers
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  max_samples_per_dataset: 10000 # Limit samples per epoch per dataset
 
+# Distillation configuration
 distillation:
   strategies:
-    - feature_matching   # Align internal embeddings
-    - logit_matching     # Soft targets (probability distillation)  
+    - feature_matching # Align internal embeddings
+    - logit_matching # Soft targets (probability distillation)
     - multimodal_alignment # Contrastive loss across text, video, audio
     - spatial_understanding # RT-DETR object detection knowledge
-    - segmentation_knowledge # HQ-SAM fine boundary understanding  
+    - segmentation_knowledge # HQ-SAM fine boundary understanding
     - rhythmic_understanding # BeatNet music structure knowledge
     - audio_separation # Demucs source separation knowledge
-  temperature: 2.0
-  alpha: 0.5   # trade-off between hard vs soft labels
-  batch_size: 16
-  learning_rate: 3e-5
-  
-  # Enhanced distillation settings
+  temperature: 3.0 # Consistent with training.phase2
+  alpha: 0.7 # Consistent with training.phase2
+  batch_size: 4 # Match training batch size or adjust based on memory
+  learning_rate: 3e-5 # Consistent with training.phase2
+
+  # Enable advanced teachers for distillation
   advanced_teachers:
     enable_rt_detr: true
-    enable_hq_sam: true  
-    enable_beatnet: true
-    enable_demucs: true
-    fallback_models: true  # Use fallback implementations if advanced models unavailable
+    enable_hq_sam: true
+    enable_beatnet: true # Requires BeatNet installation
+    enable_demucs: true # Requires demucs installation
+    fallback_models: true # Allow fallbacks if installations fail
 
+# Finetuning configuration
 finetuning:
-  method: qlora   # parameter-efficient fine-tuning
-  precision: bfloat16
-  max_epochs: 5
-  gradient_accumulation: 8
+  method: qlora # Parameter-efficient fine-tuning
+  precision: bfloat16 # Use bfloat16 if supported
+  max_epochs: 5 # Consistent with training.phase3
+  gradient_accumulation: 8 # Consistent with training.phase3
   save_every: 1000
   eval_every: 500
 
+# RLHF configuration
 rlhf:
-  reward_model: Qwen/Qwen2.5-7B
-  dataset: openassistant/oasst2-preferences
+  enabled: true # Enable RLHF
+  reward_model: Qwen/Qwen1.5-7B # Define reward model
+  dataset: openassistant/oasst2-preferences # Example preference dataset
   method: ppo
-  rollout_batch_size: 32
-  learning_rate: 1e-6
+  rollout_batch_size: 4 # Adjust based on memory
+  learning_rate: 1e-6 # Consistent with training.phase4
 
-# Enhanced self-coding configuration
+# Self-coding configuration
 self_coding:
-  model_name: codellama/CodeLlama-13b-Python-hf  # Upgraded to a more capable CodeLlama model
-  device: auto  # auto-detect CUDA/CPU
+  enabled: true # Enable self-coding engine
+  model_name: codellama/CodeLlama-13b-Python-hf # Teacher model for code gen
+  device: auto # Auto-detect CUDA/CPU
   max_length: 1024
-  
-  # Fine-tuning configuration for video effects
+
+  # Fine-tuning configuration for video effects code gen model
   fine_tuning:
     enable: true
     output_dir: ./checkpoints/codellama-video-effects
     num_epochs: 3
-    batch_size: 4
+    batch_size: 2
     learning_rate: 2e-5
     warmup_steps: 100
-    
-    # Training data sources
-    data_sources:
-      - video_effects_scripts
-      - professional_editing
-      - curated_examples
-      
+    data_sources: # Define sources for fine-tuning code gen
+      - video_effects_scripts # Assumes this dataset is downloaded/processed
+      - professional_editing # Assumes this dataset is downloaded/processed
+      - curated_examples # Assumes curated examples are available
+
   # Safe code execution
   execution:
-    max_execution_time: 30  # seconds
+    max_execution_time: 30 # seconds
     max_temp_files: 10
-    allowed_modules:
+    allowed_modules: # List modules allowed in generated code
       - numpy
       - cv2
       - PIL
       - moviepy.editor
-      - subprocess
+      - subprocess # Be cautious with subprocess
       - tempfile
-    
-    # Multi-step execution capabilities  
+      - math
+      - random
     enable_multi_step: true
     enable_ffmpeg_integration: true
     enable_asset_generation: true
-  epochs: 3
 
-datasets:
-  video:
-    - WebVid10M
-    - ActivityNet-Captions
-    - UCF101  # Action recognition dataset
-    - Kinetics-400  # Large-scale video action dataset
-  audio:
-    - AudioSet
-    - Librispeech
-  text:
-    - openassistant/oasst1
-    - Anthropic/hh-rlhf
-  multimodal:
-    - MSRVTT
-    - HowTo100M
-    - COCO-Captions
-  
-  # Template datasets for video editing training
+# Datasets listing (potentially redundant with data.datasets, but provides more detail)
+datasets: # Define where to find/process each dataset type
+  # Video datasets (referenced in data.datasets)
+  webvid10m:
+    enabled: true
+    path: ${paths.data_dir}/webvid10m # Use path interpolation
+    type: features # Assuming using precomputed features
+  activitynet:
+    enabled: true
+    path: ${paths.data_dir}/activitynet
+    type: annotations
+
+  # Audio datasets
+  audioset:
+    enabled: true
+    path: ${paths.data_dir}/audioset
+    type: metadata # Audio needs download script
+
+  # Text datasets (primarily for RLHF or general pretraining)
+  oasst1:
+    enabled: true
+    source: openassistant/oasst1
+  hh_rlhf:
+    enabled: true
+    source: Anthropic/hh-rlhf
+
+  # Multimodal datasets
+  msrvtt:
+    enabled: false # Example, disable if not used
+    path: ${paths.data_dir}/msrvtt
+  howto100m:
+    enabled: false # Example, disable if not used
+    path: ${paths.data_dir}/howto100m
+
+  # Template datasets
   templates:
-    mixkit:
-      url: "https://mixkit.co"
-      description: "Free Premiere Pro and After Effects templates"
-      categories: ["intros", "transitions", "effects", "lower_thirds", "titles"]
-      formats: ["aep", "prproj", "mogrt"]
-    videezy:
-      url: "https://videezy.com"
-      description: "Free video templates and motion graphics"
-      categories: ["motion_graphics", "video_templates", "overlays"]
-      formats: ["aep", "prproj", "mov", "mp4"]
-    capcut_templates:
-      description: "TikTok-style editing templates including phonk beats"
-      categories: ["transitions", "effects", "beat_sync", "phonk", "viral_edits"]
-      source: "capcut_api"
-    motion_array_free:
-      url: "https://motionarray.com/browse/free"
-      description: "Professional-grade free templates"
-      categories: ["premiere_pro", "after_effects", "davinci_resolve"]
-    canva_video:
-      url: "https://canva.com/video-templates"
-      description: "Simple video templates with text overlays"
-      categories: ["text_animations", "social_media", "presentations"]
-    youtube_creator_packs:
-      description: "Community-contributed template packs"
-      sources: ["youtube_descriptions", "creator_channels", "github_repos"]
-  
-  # Stock footage for template pairing
-  stock_footage:
-    pixabay:
-      url: "https://pixabay.com/videos"
-      description: "Free stock video clips"
-    pexels:
-      url: "https://pexels.com/videos"  
-      description: "Free stock videos"
-    videvo:
-      url: "https://videvo.net"
-      description: "Free stock footage and motion graphics"
+    enabled: true # Enable processing of templates
+    path: ./data/templates # Root dir for templates
+    metadata_file: ./data/templates/metadata/templates_metadata.json
+    training_pairs_file: ./data/templates/metadata/training_pairs.json
 
+  # Stock footage (used with templates)
+  stock_footage:
+    enabled: true # Enable use of stock footage
+    path: ./data/templates/stock_footage
+
+  # Synthetic data
+  synthetic:
+    enabled: true # Enable use of synthetic data
+    path: ./data/synthetic
+    metadata_file: ./data/synthetic/synthetic_dataset_metadata.json
+
+# Evaluation configuration
 evaluation:
-  benchmarks:
+  benchmarks: # Define benchmarks if needed
     - videoqa
     - video_captioning
-    - asr
-    - multimodal_reasoning
-  metrics:
+  metrics: # Define evaluation metrics
     - bleu
     - rouge
     - cider
-    - wer
-    - accuracy
+    - wer # Word Error Rate for ASR aspects
+    - accuracy # For classification tasks
+    - f1 # For detection/segmentation
+
+# Logging configuration
+logging:
+  experiment_name: full-training-run
+  log_level: INFO # INFO for standard runs, DEBUG for verbose
+  log_to_file: true
+  use_wandb: true # Enable WandB tracking
+  wandb_project: autonomous-video-editor # WandB project name
+  checkpoint_dir: ${paths.checkpoints_dir} # Use path variable
+  eval_every: 500 # Consistent with finetuning
+  save_every: 1000 # Consistent with finetuning
+
+# System configuration
+system:
+  device: auto # Auto-detect GPU/CPU
+  mixed_precision: true # Enable mixed precision if GPU supports it
+  gradient_checkpointing: true # Save memory during training
+  dataloader_pin_memory: true # Speed up data loading
+  num_workers: 4 # Consistent with data.num_workers
+  compile_model: false # Optional: Compile model for speed (requires PyTorch 2.0+)
+
+# Safe mode block (present but disabled for main config)
+safe_mode:
+  enabled: false

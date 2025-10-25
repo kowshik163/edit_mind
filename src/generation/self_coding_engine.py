@@ -406,10 +406,16 @@ class VideoEffectCodeGenerator:
             self.tokenizer = None
     
     def generate_effect_code(self, effect_description: str, 
-                           reference_effects: List[Dict] = None) -> Optional[str]:
+                           reference_effects: List[Dict] = None,
+                           video_metadata: Dict[str, Any] = None) -> Optional[str]:
         """
         Production-ready video effect code generation using fine-tuned CodeLLaMA with advanced strategies.
         Implements multiple generation approaches, sophisticated validation, and robust fallback systems.
+        
+        Args:
+            effect_description: Natural language description of the desired effect
+            reference_effects: Optional list of similar effects for reference
+            video_metadata: Optional video context (frame size, FPS, detected objects, etc.)
         """
         
         # Initialize model if needed
@@ -425,10 +431,10 @@ class VideoEffectCodeGenerator:
             # Multi-stage generation process for optimal results
             logger.info(f"🎬 Generating video effect code for: '{effect_description}'")
             
-            # Stage 1: Comprehensive prompt engineering
+            # Stage 1: Comprehensive prompt engineering with video context
             generation_context = self._analyze_effect_requirements(effect_description)
             sophisticated_prompt = self._create_production_grade_prompt(
-                effect_description, reference_effects, generation_context
+                effect_description, reference_effects, generation_context, video_metadata
             )
             
             # Stage 2: Advanced tokenization with context preservation
@@ -1091,16 +1097,65 @@ def custom_effect(frame: np.ndarray, **kwargs) -> np.ndarray:
 '''
 
     def _create_production_grade_prompt(self, description: str, reference_effects: List[Dict] = None,
-                                      context: Dict[str, Any] = None) -> str:
-        """Create production-grade prompt for CodeLLaMA"""
+                                      context: Dict[str, Any] = None, video_metadata: Dict[str, Any] = None) -> str:
+        """Create production-grade prompt for CodeLLaMA with rich video context
         
-        # Build comprehensive context
+        Args:
+            description: Effect description from user
+            reference_effects: Similar effects for reference
+            context: Analysis context (complexity, performance, etc.)
+            video_metadata: Video information (frame size, FPS, detected objects, etc.)
+        """
+        
+        # Extract video metadata with defaults
+        if video_metadata is None:
+            video_metadata = {}
+        
+        frame_width = video_metadata.get('frame_width', 1920)
+        frame_height = video_metadata.get('frame_height', 1080)
+        fps = video_metadata.get('fps', 30)
+        duration = video_metadata.get('duration', 10.0)
+        aspect_ratio = video_metadata.get('aspect_ratio', '16:9')
+        detected_objects = video_metadata.get('detected_objects', [])
+        scene_info = video_metadata.get('scene_info', {})
+        color_profile = video_metadata.get('color_profile', 'sRGB')
+        
+        # Build comprehensive context with video metadata
         context_str = f"""
 # Professional Video Effects Code Generator
 # Expertise: Computer Vision, Image Processing, Video Effects Programming
 # Libraries: OpenCV, NumPy, Advanced Mathematics
 # Target: Production-ready, optimized video processing code
 
+## Video Context Information:
+- Frame Resolution: {frame_width}x{frame_height} ({aspect_ratio})
+- Frame Rate: {fps} FPS
+- Video Duration: {duration:.2f} seconds
+- Color Profile: {color_profile}
+- Total Frames: {int(fps * duration)}
+"""
+        
+        # Add detected objects information if available
+        if detected_objects:
+            context_str += f"\n## Detected Objects in Scene:\n"
+            for obj in detected_objects[:10]:  # Limit to top 10 objects
+                obj_name = obj.get('name', 'unknown')
+                confidence = obj.get('confidence', 0.0)
+                bbox = obj.get('bbox', [])
+                context_str += f"- {obj_name} (confidence: {confidence:.2f})"
+                if bbox:
+                    context_str += f" at position [{bbox[0]:.0f}, {bbox[1]:.0f}, {bbox[2]:.0f}, {bbox[3]:.0f}]"
+                context_str += "\n"
+        
+        # Add scene information if available
+        if scene_info:
+            context_str += f"\n## Scene Analysis:\n"
+            context_str += f"- Brightness: {scene_info.get('brightness', 'unknown')}\n"
+            context_str += f"- Contrast: {scene_info.get('contrast', 'unknown')}\n"
+            context_str += f"- Dominant Colors: {', '.join(str(c) for c in scene_info.get('dominant_colors', []))}\n"
+            context_str += f"- Motion Level: {scene_info.get('motion_level', 'unknown')}\n"
+        
+        context_str += f"""
 ## Effect Request Analysis:
 - Description: {description}
 - Complexity Level: {context.get('complexity_level', 'moderate') if context else 'moderate'}
@@ -1111,14 +1166,16 @@ def custom_effect(frame: np.ndarray, **kwargs) -> np.ndarray:
 ## Code Generation Guidelines:
 1. Write professional, production-ready Python code
 2. Use OpenCV (cv2) and NumPy for video processing
-3. Include comprehensive docstrings and type hints
-4. Implement proper error handling and bounds checking
-5. Optimize for performance and memory efficiency
-6. Follow PEP 8 coding standards
+3. IMPORTANT: Code will process frames of size {frame_width}x{frame_height}
+4. IMPORTANT: Handle frame shape (height, width, channels) = ({frame_height}, {frame_width}, 3)
+5. Include comprehensive docstrings and type hints
+6. Implement proper error handling and bounds checking
+7. Optimize for performance at {fps} FPS
+8. Follow PEP 8 coding standards
+9. Consider detected objects and scene context when relevant
 
 ## Reference Examples:
 """
-        
         # Add reference effects if provided
         if reference_effects:
             context_str += "### Similar Effects:\n"

@@ -102,7 +102,7 @@ def create_synthetic_audio(output_path: str, duration: float = 10.0, sample_rate
 
 
 def create_sample_annotations(video_path: str, audio_path: str, output_dir: str) -> str:
-    """Create sample annotations for the synthetic media"""
+    """Create sample annotations for the synthetic media with detailed parameters"""
     
     annotations = {
         "video_info": {
@@ -129,11 +129,101 @@ def create_sample_annotations(video_path: str, audio_path: str, output_dir: str)
             ],
             "beats": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 
                      5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5],  # Beat timings
+            
+            # Effects with detailed parameters
             "effects": [
-                {"type": "fade_in", "start": 0.0, "duration": 0.5},
-                {"type": "zoom", "start": 2.5, "duration": 1.0},
-                {"type": "color_enhance", "start": 5.0, "duration": 2.5},
-                {"type": "fade_out", "start": 9.5, "duration": 0.5}
+                {
+                    "type": "fade_in",
+                    "start": 0.0,
+                    "duration": 0.5,
+                    "intensity": 1.0,
+                    "speed": 1.0,
+                    "scale": 1.0,
+                    "direction": 0.0,
+                    "ease_in": 0.2,
+                    "ease_out": 0.0
+                },
+                {
+                    "type": "zoom",
+                    "start": 2.5,
+                    "duration": 1.0,
+                    "intensity": 0.8,
+                    "speed": 1.0,
+                    "scale": 1.3,
+                    "direction": 0.5,
+                    "ease_in": 0.3,
+                    "ease_out": 0.3
+                },
+                {
+                    "type": "color_enhance",
+                    "start": 5.0,
+                    "duration": 2.5,
+                    "intensity": 0.7,
+                    "speed": 1.0,
+                    "scale": 1.0,
+                    "direction": 0.0,
+                    "ease_in": 0.1,
+                    "ease_out": 0.1
+                },
+                {
+                    "type": "speed_ramp",
+                    "start": 6.0,
+                    "duration": 1.5,
+                    "intensity": 0.9,
+                    "speed": 1.5,
+                    "scale": 1.0,
+                    "direction": 0.0,
+                    "ease_in": 0.4,
+                    "ease_out": 0.2
+                },
+                {
+                    "type": "fade_out",
+                    "start": 9.5,
+                    "duration": 0.5,
+                    "intensity": 1.0,
+                    "speed": 1.0,
+                    "scale": 1.0,
+                    "direction": 0.0,
+                    "ease_in": 0.0,
+                    "ease_out": 0.2
+                }
+            ],
+            
+            # Transitions with detailed parameters
+            "transitions": [
+                {
+                    "type": "fade",
+                    "start": 2.5,
+                    "duration": 0.3,
+                    "intensity": 0.9,
+                    "direction": 0.0,
+                    "smoothness": 0.7,
+                    "offset": 0.0,
+                    "angle": 0.0,
+                    "scale": 1.0
+                },
+                {
+                    "type": "dissolve",
+                    "start": 5.0,
+                    "duration": 0.5,
+                    "intensity": 1.0,
+                    "direction": 0.0,
+                    "smoothness": 0.8,
+                    "offset": 0.0,
+                    "angle": 0.0,
+                    "scale": 1.0
+                },
+                {
+                    "type": "wipe",
+                    "start": 7.5,
+                    "duration": 0.4,
+                    "intensity": 1.0,
+                    "direction": 0.25,  # Left to right
+                    "smoothness": 0.5,
+                    "offset": 0.0,
+                    "angle": 0.0,
+                    "scale": 1.0
+                }
             ]
         },
         "text_prompts": [

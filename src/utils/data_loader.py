@@ -198,8 +198,16 @@ class VideoEditingDataset(data.Dataset):
                 'prompt': f"Edit this video to create a {['cinematic', 'AMV-style', 'TikTok-style'][i % 3]} video",
                 'target_timeline': {
                     'cuts': [2.5, 5.0, 7.5],
-                    'transitions': ['fade', 'cut', 'dissolve'],
-                    'effects': ['color_grade', 'speed_ramp', 'zoom']
+                    'transitions': [
+                        {'type': 'fade', 'start': 2.5, 'duration': 0.5, 'intensity': 0.8},
+                        {'type': 'cut', 'start': 5.0, 'duration': 0.0},
+                        {'type': 'dissolve', 'start': 7.5, 'duration': 1.0, 'intensity': 0.6}
+                    ],
+                    'effects': [
+                        {'type': 'color_grade', 'start': 0.0, 'duration': 3.0, 'intensity': 0.7},
+                        {'type': 'speed_ramp', 'start': 3.0, 'duration': 2.0, 'speed': 1.5, 'ease_in': 0.3},
+                        {'type': 'zoom', 'start': 5.5, 'duration': 1.5, 'scale': 1.2, 'direction': 0.5}
+                    ]
                 }
             })
         return samples
@@ -309,31 +317,128 @@ class VideoEditingDataset(data.Dataset):
             logger.warning(f"Error loading audio {audio_path}: {e}")
             return torch.randn(self.max_audio_length)
     
-    def _process_timeline_targets(self, timeline_data: Dict) -> torch.Tensor:
-        """Process timeline targets into tensor format"""
-        # For now, create a simple binary timeline (cut/no-cut for each frame)
-        timeline = torch.zeros(self.max_frames, dtype=torch.long)
+    def _process_timeline_targets(self, timeline_data: Dict) -> Dict[str, torch.Tensor]:
+        """Process timeline targets into tensor format with detailed parameters
         
+        Returns:
+            Dict containing:
+                - cut_points: Binary tensor marking cut locations [max_frames]
+                - effect_types: Categorical labels for effects [max_effects]
+                - effect_params: Continuous parameters for effects [max_effects, param_dim]
+                - transition_types: Categorical labels for transitions [max_transitions]
+                - transition_params: Continuous parameters for transitions [max_transitions, param_dim]
+        """
+        max_effects = 10
+        max_transitions = 10
+        param_dim = 8  # Number of parameters per effect/transition
+        
+        # Initialize tensors
+        cut_points = torch.zeros(self.max_frames, dtype=torch.long)
+        
+        # Effect type mapping
+        effect_type_map = {
+            'none': 0, 'fade_in': 1, 'fade_out': 2, 'zoom': 3, 'zoom_in': 4, 'zoom_out': 5,
+            'pan': 6, 'color_grade': 7, 'color_enhance': 8, 'blur': 9, 'sharpen': 10,
+            'vignette': 11, 'speed_ramp': 12, 'slow_motion': 13, 'fast_forward': 14,
+            'freeze_frame': 15, 'glitch': 16, 'rgb_split': 17, 'chromatic_aberration': 18
+        }
+        
+        # Transition type mapping
+        transition_type_map = {
+            'none': 0, 'cut': 1, 'fade': 2, 'dissolve': 3, 'crossfade': 4,
+            'wipe': 5, 'slide': 6, 'push': 7, 'zoom_transition': 8, 'spin': 9,
+            'morph': 10, 'dip_to_black': 11, 'dip_to_white': 12
+        }
+        
+        effect_types = torch.zeros(max_effects, dtype=torch.long)
+        effect_params = torch.zeros(max_effects, param_dim, dtype=torch.float32)
+        transition_types = torch.zeros(max_transitions, dtype=torch.long)
+        transition_params = torch.zeros(max_transitions, param_dim, dtype=torch.float32)
+        
+        # Process cut points
         if 'cuts' in timeline_data:
-            # Assume cuts are in seconds, convert to frame indices
             fps = 30  # Default FPS
             cut_frames = [int(cut_time * fps * self.max_frames / (self.max_frames / fps)) 
                          for cut_time in timeline_data['cuts']]
             
             for cut_frame in cut_frames:
                 if 0 <= cut_frame < self.max_frames:
-                    timeline[cut_frame] = 1  # Mark as cut
+                    cut_points[cut_frame] = 1
         
-        return timeline
+        # Process effects with parameters
+        if 'effects' in timeline_data:
+            effects = timeline_data['effects']
+            for i, effect in enumerate(effects[:max_effects]):
+                if isinstance(effect, dict):
+                    effect_type = effect.get('type', 'none')
+                    effect_types[i] = effect_type_map.get(effect_type, 0)
+                    
+                    # Extract parameters (normalized to [0, 1] range)
+                    params = [
+                        effect.get('start', 0.0) / 30.0,  # Normalized time
+                        effect.get('duration', 1.0) / 10.0,  # Normalized duration
+                        effect.get('intensity', 0.5),  # Effect strength
+                        effect.get('speed', 1.0),  # Speed multiplier (for speed effects)
+                        effect.get('scale', 1.0),  # Scale factor (for zoom/pan)
+                        effect.get('direction', 0.0),  # Direction (0-1 mapping to 0-360 degrees)
+                        effect.get('ease_in', 0.0),  # Easing curve parameter
+                        effect.get('ease_out', 0.0)  # Easing curve parameter
+                    ]
+                    effect_params[i] = torch.tensor(params, dtype=torch.float32)
+                elif isinstance(effect, str):
+                    # Simple string effect without parameters
+                    effect_types[i] = effect_type_map.get(effect, 0)
+        
+        # Process transitions with parameters
+        if 'transitions' in timeline_data:
+            transitions = timeline_data['transitions']
+            for i, transition in enumerate(transitions[:max_transitions]):
+                if isinstance(transition, dict):
+                    trans_type = transition.get('type', 'none')
+                    transition_types[i] = transition_type_map.get(trans_type, 0)
+                    
+                    # Extract parameters
+                    params = [
+                        transition.get('start', 0.0) / 30.0,  # Normalized time
+                        transition.get('duration', 0.5) / 2.0,  # Normalized duration
+                        transition.get('intensity', 1.0),  # Transition strength
+                        transition.get('direction', 0.0),  # Direction (for wipes/slides)
+                        transition.get('smoothness', 0.5),  # Smoothness/feathering
+                        transition.get('offset', 0.0),  # Offset parameter
+                        transition.get('angle', 0.0),  # Angle (for directional transitions)
+                        transition.get('scale', 1.0)  # Scale factor
+                    ]
+                    transition_params[i] = torch.tensor(params, dtype=torch.float32)
+                elif isinstance(transition, str):
+                    # Simple string transition without parameters
+                    transition_types[i] = transition_type_map.get(transition, 0)
+        
+        return {
+            'cut_points': cut_points,
+            'effect_types': effect_types,
+            'effect_params': effect_params,
+            'transition_types': transition_types,
+            'transition_params': transition_params
+        }
     
     def _get_dummy_sample(self) -> Dict[str, torch.Tensor]:
         """Return a dummy sample when loading fails"""
+        max_effects = 10
+        max_transitions = 10
+        param_dim = 8
+        
         return {
             'video_frames': torch.randn(self.max_frames, 3, 224, 224),
             'audio_features': torch.randn(self.max_audio_length),
             'input_ids': torch.zeros(512, dtype=torch.long),
             'attention_mask': torch.ones(512, dtype=torch.long),
-            'timeline_targets': torch.zeros(self.max_frames, dtype=torch.long),
+            'timeline_targets': {
+                'cut_points': torch.zeros(self.max_frames, dtype=torch.long),
+                'effect_types': torch.zeros(max_effects, dtype=torch.long),
+                'effect_params': torch.zeros(max_effects, param_dim, dtype=torch.float32),
+                'transition_types': torch.zeros(max_transitions, dtype=torch.long),
+                'transition_params': torch.zeros(max_transitions, param_dim, dtype=torch.float32)
+            },
             'metadata': {
                 'video_id': 'dummy',
                 'prompt': 'Create a video edit'
@@ -494,7 +599,7 @@ def prepare_activitynet_dataset(data_dir: str, output_dir: str):
 
 
 def create_sample_dataset(output_dir: str, num_samples: int = 100):
-    """Create a small sample dataset for testing"""
+    """Create a small sample dataset for testing with detailed parameters"""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
@@ -504,6 +609,11 @@ def create_sample_dataset(output_dir: str, num_samples: int = 100):
         split_size = int(num_samples * 0.8) if split == 'train' else int(num_samples * 0.2)
         
         for i in range(split_size):
+            # Vary parameters for diversity
+            intensity_var = 0.5 + (i % 10) * 0.05
+            speed_var = 0.8 + (i % 15) * 0.1
+            scale_var = 1.0 + (i % 8) * 0.1
+            
             samples.append({
                 'video_id': f'{split}_video_{i}',
                 'video_path': f'{split}_video_{i}.mp4',  # These won't exist but will use dummy data
@@ -511,8 +621,16 @@ def create_sample_dataset(output_dir: str, num_samples: int = 100):
                 'prompt': f"Edit this video to create a {['cinematic', 'AMV-style', 'TikTok-style'][i % 3]} video with smooth transitions and engaging pacing.",
                 'target_timeline': {
                     'cuts': [2.0 + i*0.5, 4.0 + i*0.5, 6.0 + i*0.5],
-                    'transitions': ['fade', 'cut', 'dissolve'],
-                    'effects': ['color_grade', 'speed_ramp', 'zoom']
+                    'transitions': [
+                        {'type': 'fade', 'start': 2.0 + i*0.5, 'duration': 0.4, 'intensity': intensity_var, 'smoothness': 0.7},
+                        {'type': 'cut', 'start': 4.0 + i*0.5, 'duration': 0.0},
+                        {'type': 'dissolve', 'start': 6.0 + i*0.5, 'duration': 0.6, 'intensity': intensity_var * 0.9, 'smoothness': 0.8}
+                    ],
+                    'effects': [
+                        {'type': 'color_grade', 'start': 0.0, 'duration': 3.0, 'intensity': intensity_var, 'ease_in': 0.2},
+                        {'type': 'speed_ramp', 'start': 3.0, 'duration': 2.0, 'speed': speed_var, 'ease_in': 0.3, 'ease_out': 0.2},
+                        {'type': 'zoom', 'start': 5.0, 'duration': 1.5, 'scale': scale_var, 'direction': 0.5}
+                    ]
                 }
             })
         

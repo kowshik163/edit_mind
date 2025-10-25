@@ -125,7 +125,7 @@ class HybridVideoAI(nn.Module):
                 cache_dir=config.get('model_cache_dir', 'models/cache'),
                 torch_dtype=model_dtype
             )
-            self.audio_processor = WhisperProcessor.from_pretrained(
+            self.whisper_processor = WhisperProcessor.from_pretrained(
                 audio_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
@@ -137,7 +137,7 @@ class HybridVideoAI(nn.Module):
                 audio_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
-            self.audio_processor = WhisperProcessor.from_pretrained(
+            self.whisper_processor = WhisperProcessor.from_pretrained(
                 audio_model,
                 cache_dir=config.get('model_cache_dir', 'models/cache')
             )
@@ -376,11 +376,11 @@ class HybridVideoAI(nn.Module):
             # Process audio to mel-spectrogram using the processor
             # The processor expects a list of numpy arrays
             audio_list = [audio.cpu().numpy() for audio in audio_features]
-            processed_audio = self.audio_processor(
+            processed_audio = self.audio_processor.whisper_processor(
                 audio_list,
                 sampling_rate=16000,
                 return_tensors="pt",
-                padding=True
+                padding="max_length"
             )
             
             # Move to correct device and dtype
