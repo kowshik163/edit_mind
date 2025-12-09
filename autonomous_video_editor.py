@@ -98,6 +98,14 @@ logging.basicConfig(
         logging.FileHandler('autonomous_editor.log')
     ]
 )
+try:
+    from src.generation.self_coding_engine import SelfCodingVideoEditor
+except ImportError:
+    try:
+        from generation.self_coding_engine import SelfCodingVideoEditor
+    except ImportError:
+        SelfCodingVideoEditor = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,6 +125,7 @@ class AutonomousVideoEditorApp:
         self.dataset_downloader = None
         self.training_orchestrator = None
         self.effect_generator = None
+        self.self_coding_engine = None
         self.autonomous_editor = None
         self.hybrid_ai = None
         
@@ -200,6 +209,18 @@ class AutonomousVideoEditorApp:
             quality=self.config['effects']['quality'],
             gpu_acceleration=self.config['effects']['gpu_acceleration']
         )
+        
+        if SelfCodingVideoEditor:
+            # Create config for SelfCodingVideoEditor
+            self_coding_config = {
+                'codellama_model': self.config.get('self_coding', {}).get('model', 'codellama/CodeLlama-7b-Python-hf'),
+                'device': self.config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'),
+                'execution_timeout': 30,
+                'effects_database': 'data/datasets/video_effects_scripts/samples.json'
+            }
+            self.self_coding_engine = SelfCodingVideoEditor(self_coding_config)
+        else:
+            logger.warning("SelfCodingVideoEditor not available.")
         
         logger.info("Setup complete!")
         
@@ -297,7 +318,8 @@ class AutonomousVideoEditorApp:
             self.autonomous_editor = AutonomousVideoEditor(
                 ai_model=self.hybrid_ai,
                 effect_generator=self.effect_generator,
-                config=self.config
+                config=self.config,
+                self_coding_engine=self.self_coding_engine
             )
             
             logger.info("Model loaded successfully!")

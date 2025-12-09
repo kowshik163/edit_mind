@@ -8,8 +8,17 @@ import cv2
 import torch
 import numpy as np
 import logging
+import json
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+
+try:
+    from src.generation.self_coding_engine import SelfCodingVideoEditor
+except ImportError:
+    try:
+        from ..generation.self_coding_engine import SelfCodingVideoEditor
+    except ImportError:
+        SelfCodingVideoEditor = None
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +26,7 @@ logger = logging.getLogger(__name__)
 class AutonomousVideoEditor:
     """High-level interface for autonomous video editing"""
     
-    def __init__(self, ai_model, effect_generator, config: Dict[str, Any]):
+    def __init__(self, ai_model, effect_generator, config: Dict[str, Any], self_coding_engine: Optional[Any] = None):
         """
         Initialize the autonomous video editor
         
@@ -25,10 +34,12 @@ class AutonomousVideoEditor:
             ai_model: The trained HybridVideoAI model
             effect_generator: AdvancedEffectGenerator instance
             config: Configuration dictionary
+            self_coding_engine: Optional SelfCodingVideoEditor instance
         """
         self.ai_model = ai_model
         self.effect_generator = effect_generator
         self.config = config
+        self.self_coding_engine = self_coding_engine
         
     def edit_video(self, video_path: str, editing_prompt: str, output_path: str) -> Dict[str, Any]:
         """
@@ -51,10 +62,10 @@ class AutonomousVideoEditor:
             original_frame_count = len(frames)
             
             # Analyze editing prompt and generate plan
-            edit_plan = self._generate_edit_plan(editing_prompt, frames)
+            edit_plan = self._generate_edit_plan(editing_prompt, frames, video_path)
             
             # Apply edits based on the plan
-            edited_frames = self._apply_edits(frames, edit_plan)
+            edited_frames = self._apply_edits(frames, edit_plan, fps)
             
             # Save edited video
             self._save_video(edited_frames, output_path, fps, audio)
@@ -131,9 +142,221 @@ class AutonomousVideoEditor:
         
         return frames, fps, audio
     
-    def _generate_edit_plan(self, prompt: str, frames: List[np.ndarray]) -> Dict[str, Any]:
-        """Generate editing plan based on prompt and video analysis"""
-        logger.info("Generating edit plan...")
+    def _generate_edit_plan(self, prompt: str, frames: List[np.ndarray], video_path: str = None) -> Dict[str, Any]:
+        """Generate editing plan based on prompt and video analysis using Gemini API"""
+        logger.info("Generating edit plan using Gemini API...")
+        
+        try:
+            import google.generativeai as genai
+            import time
+            from google.api_core import exceptions
+            
+            # Configure Gemini API
+            api_key = os.environ.get("AIzaSyAotS0WoSyBb4jc9MxOg-joKQ3xJr5ughM")
+            if not api_key:
+                logger.warning("GEMINI_API_KEY not found in environment variables. Falling back to rule-based planner.")
+                return self._generate_rule_based_plan(prompt)
+                
+            genai.configure(api_key=api_key)
+            
+            # Upload video to Gemini
+            if not video_path or not os.path.exists(video_path):
+                logger.warning("Video path not provided or invalid. Falling back to rule-based planner.")
+                return self._generate_rule_based_plan(prompt)
+                
+            logger.info(f"Uploading video to Gemini: {video_path}")
+            video_file = genai.upload_file(path=video_path)
+            
+            # Wait for processing
+            while video_file.state.name == "PROCESSING":
+                logger.info("Waiting for video processing...")
+                time.sleep(2)
+                video_file = genai.get_file(video_file.name)
+                
+            if video_file.state.name == "FAILED":
+                logger.error("Video processing failed in Gemini.")
+                return self._generate_rule_based_plan(prompt)
+                
+            logger.info("Video processing complete.")
+            
+            # Define available models in order of preference
+            models_to_try = [
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+                "gemini-1.0-pro-vision"
+            ]
+            
+            # Load memory context if available
+            memory_context = ""
+            memory_file = Path("data/editor_memory.json")
+            if memory_file.exists():
+                try:
+                    with open(memory_file, 'r') as f:
+                        memory_data = json.load(f)
+                        memory_context = f"\n### Editor Memory & Preferences\n{json.dumps(memory_data, indent=2)}\n"
+                        logger.info("Loaded editor memory context.")
+                except Exception as e:
+                    logger.warning(f"Failed to load editor memory: {e}")
+
+            # Construct the comprehensive system prompt
+            system_prompt = """
+            You are an expert Autonomous Video Editor AI. Your goal is to analyze the provided video media and generate a highly detailed, professional editing plan based on the user's intent.
+            """ + memory_context + """
+            
+            ### System Capabilities & Available Models
+            We are equipped with an Advanced Effect Generator capable of the following operations:
+            
+            **1. Color & Lighting:**
+            - `basic_color`: Adjust brightness, contrast, saturation.
+            - `hue_shift`: Shift global hue.
+            - `color_temp_tint`: Adjust temperature (warm/cool) and tint (green/magenta).
+            - `vibrance`: Smart saturation boost.
+            - `shadows_highlights`: Independent control of shadow and highlight recovery.
+            - `curves_poly`: Polynomial curve adjustment.
+            - `lut_apply`: Apply Look-Up Tables (LUTs).
+            
+            **2. Blur & Sharpen:**
+            - `blur_gaussian`, `blur_box`, `blur_median`: Standard blurs.
+            - `blur_motion`: Directional motion blur.
+            - `blur_radial`: Zoom/spin blur.
+            - `blur_bokeh`: Cinematic depth-of-field simulation.
+            - `sharpen_basic`, `sharpen_unsharpmask`: Detail enhancement.
+            
+            **3. Distortion & FX:**
+            - `distort_ripple`, `distort_wave`: Water/wave effects.
+            - `distort_pinch_punch`, `distort_twirl`, `distort_fisheye`: Geometric distortions.
+            - `vignette`: Cinematic corner darkening.
+            - `glitch_analog`, `glitch_digital`: Glitch art effects.
+            
+            **4. Stylization:**
+            - `style_pixelate`, `style_halftone`, `style_sketch`, `style_cartoon`.
+            - `style_emboss`, `style_edge_detect`.
+            
+            **5. Transformations:**
+            - `transform_zoom`, `transform_rotate`, `transform_shake`.
+            
+            ### Custom Code Generation
+            If the user requests an effect NOT listed above (e.g., "matrix rain", "fire particles", "advanced object removal"), you must specify it in the `custom_code_requests` section.
+            Provide a detailed technical description of how this effect should be implemented in Python using OpenCV/NumPy. The Self-Coding Engine will use this description to generate the code.
+            
+            ### Task Instructions
+            1.  **Analyze the Media**: Provide a detailed breakdown of the video content, including:
+                -   **Scene Description**: What is happening?
+                -   **Objects/Subjects**: List key elements detected.
+                -   **Mood/Atmosphere**: The emotional tone (e.g., energetic, melancholic, professional).
+                -   **Technical Quality**: Lighting, stability, color balance.
+            
+            2.  **Interpret User Intent**: Analyze the user's prompt to understand the desired outcome (e.g., "make it cinematic", "fast-paced action", "vintage vlog").
+            
+            3.  **Generate Editing Plan**: Create a JSON object detailing the specific edits to apply.
+            
+            ### Output Format (JSON)
+            Return ONLY a valid JSON object with this structure:
+            {
+                "analysis": {
+                    "summary": "Detailed summary of the video content.",
+                    "scenes": [
+                        {"start": 0.0, "end": 5.0, "description": "Opening shot of a city street, daytime."},
+                        {"start": 5.0, "end": 10.0, "description": "Close up of subject walking."}
+                    ],
+                    "objects": ["car", "building", "person", "tree"],
+                    "mood": "Urban, busy, neutral lighting",
+                    "technical_notes": "Slightly shaky footage, good exposure."
+                },
+                "editing_intent": "User wants a high-energy urban montage with a cyberpunk aesthetic.",
+                "plan": {
+                    "effects": [
+                        {
+                            "name": "color_grade_cinematic", 
+                            "description": "Apply teal and orange look",
+                            "parameters": {"intensity": 0.8}
+                        },
+                        {
+                            "name": "vignette",
+                            "parameters": {"intensity": 0.5}
+                        }
+                    ],
+                    "custom_code_requests": [
+                        {
+                            "name": "matrix_rain_overlay",
+                            "description": "Generate falling green characters similar to The Matrix. Use OpenCV to draw random characters in columns with varying speeds and fading trails. Overlay on the video with additive blending.",
+                            "parameters": {"density": 0.5, "speed": 1.0}
+                        }
+                    ],
+                    "cuts": [
+                        {"start": 0.0, "end": 4.5, "description": "Trim start to remove camera setup"},
+                        {"start": 5.2, "end": 9.8, "description": "Keep walking segment"}
+                    ],
+                    "transitions": [
+                        {"type": "fade", "duration": 0.5, "position": "start"},
+                        {"type": "glitch_digital", "duration": 0.3, "position": 4.5}
+                    ],
+                    "timing": {
+                        "speed_factor": 1.0,
+                        "slow_motion_segments": [{"start": 6.0, "end": 8.0, "factor": 0.5}]
+                    },
+                    "audio": {
+                        "volume_adjust": 1.0,
+                        "background_track_genre": "Synthwave"
+                    }
+                }
+            }
+            """
+            
+            user_message = f"User Editing Request: {prompt}"
+            
+            # Try models in sequence
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"Requesting editing plan from Gemini model: {model_name}...")
+                    model = genai.GenerativeModel(model_name=model_name)
+                    
+                    # Generate content
+                    response = model.generate_content([video_file, system_prompt, user_message])
+                    
+                    # Parse JSON response
+                    response_text = response.text
+                    if "```json" in response_text:
+                        json_str = response_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in response_text:
+                        json_str = response_text.split("```")[1].split("```")[0].strip()
+                    else:
+                        json_str = response_text.strip()
+                        
+                    plan = json.loads(json_str)
+                    logger.info(f"Gemini ({model_name}) generated plan successfully.")
+                    
+                    # Normalize plan structure for internal use
+                    # Map the detailed 'plan' structure back to the flat structure expected by _apply_edits
+                    flat_plan = {
+                        'effects': [e['name'] if isinstance(e, dict) else e for e in plan.get('plan', {}).get('effects', [])],
+                        'custom_code_requests': plan.get('plan', {}).get('custom_code_requests', []),
+                        'cuts': plan.get('plan', {}).get('cuts', []),
+                        'transitions': plan.get('plan', {}).get('transitions', []),
+                        'timing': plan.get('plan', {}).get('timing', {}),
+                        'analysis': plan.get('analysis', {}),
+                        'detailed_plan': plan # Keep the full detailed plan for reference/logging
+                    }
+                    
+                    return flat_plan
+                    
+                except exceptions.ResourceExhausted:
+                    logger.warning(f"Rate limit exceeded for model {model_name}. Trying next model...")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error with model {model_name}: {e}")
+                    continue
+            
+            logger.error("All Gemini models failed or rate limited.")
+            return self._generate_rule_based_plan(prompt)
+                
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            return self._generate_rule_based_plan(prompt)
+
+    def _generate_rule_based_plan(self, prompt: str) -> Dict[str, Any]:
+        """Fallback rule-based plan generation"""
+        logger.info("Using fallback rule-based planner...")
         
         # Simple rule-based plan generation (can be replaced with AI model inference)
         plan = {
@@ -169,16 +392,66 @@ class AutonomousVideoEditor:
         if not plan['effects']:
             plan['effects'].append('color_grade_cinematic')
             
-        logger.info(f"Generated plan: {plan}")
+        logger.info(f"Generated fallback plan: {plan}")
         return plan
     
-    def _apply_edits(self, frames: List[np.ndarray], edit_plan: Dict[str, Any]) -> List[np.ndarray]:
+    def _apply_edits(self, frames: List[np.ndarray], edit_plan: Dict[str, Any], fps: float = 30.0) -> List[np.ndarray]:
         """Apply edits based on the generated plan"""
         logger.info("Applying edits...")
         
-        edited_frames = frames.copy()
+        # Handle cuts/segments if specified
+        if edit_plan.get('cuts'):
+            logger.info(f"Applying {len(edit_plan['cuts'])} cuts...")
+            segmented_frames = []
+            for cut in edit_plan['cuts']:
+                start_time = cut.get('start', 0.0)
+                end_time = cut.get('end', len(frames) / fps)
+                
+                start_frame = int(start_time * fps)
+                end_frame = int(end_time * fps)
+                
+                # Clamp to valid range
+                start_frame = max(0, min(start_frame, len(frames)))
+                end_frame = max(0, min(end_frame, len(frames)))
+                
+                if start_frame < end_frame:
+                    segment = frames[start_frame:end_frame]
+                    segmented_frames.extend(segment)
+            
+            if segmented_frames:
+                edited_frames = segmented_frames
+            else:
+                logger.warning("Cuts resulted in empty video, using original frames.")
+                edited_frames = frames.copy()
+        else:
+            edited_frames = frames.copy()
+            
         total_frames = len(edited_frames)
         
+        # Apply custom code effects if available
+        if edit_plan.get('custom_code_requests') and self.self_coding_engine:
+            logger.info(f"Processing {len(edit_plan['custom_code_requests'])} custom code requests...")
+            for request in edit_plan['custom_code_requests']:
+                try:
+                    effect_name = request.get('name', 'custom_effect')
+                    description = request.get('description', '')
+                    parameters = request.get('parameters', {})
+                    
+                    logger.info(f"Generating and applying custom code for: {effect_name}")
+                    
+                    # Use the SelfCodingEngine's high-level method to generate and apply the effect
+                    # This handles code generation, validation, testing, and application to all frames
+                    edited_frames = self.self_coding_engine.apply_generated_effect(
+                        frames=edited_frames,
+                        effect_description=description,
+                        **parameters
+                    )
+                        
+                except Exception as e:
+                    logger.error(f"Error processing custom request {request}: {e}")
+        elif edit_plan.get('custom_code_requests') and not self.self_coding_engine:
+            logger.warning("Custom code requests present but SelfCodingEngine not initialized.")
+
         # Apply effects
         for effect_name in edit_plan['effects']:
             logger.info(f"Applying effect: {effect_name}")
